@@ -105,12 +105,33 @@ export default function App() {
 
   // Listen to Firebase Auth state (e.g. Google Sign In)
   useEffect(() => {
+    import('./firebase').then(({ getRedirectResult }) => {
+      getRedirectResult(auth)
+        .then((result) => {
+          if (result && result.user) {
+            const googleUser: UserAccount = {
+              uid: result.user.uid,
+              email: result.user.email,
+              displayName:
+                result.user.displayName || result.user.email?.split('@')[0] || 'Google User',
+              provider: 'google',
+            };
+            setUser(googleUser);
+            saveLocalAccount(googleUser);
+          }
+        })
+        .catch((err) => {
+          console.warn('Redirect sign-in notice:', err);
+        });
+    });
+
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
         const googleUser: UserAccount = {
           uid: firebaseUser.uid,
           email: firebaseUser.email,
-          displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Google User',
+          displayName:
+            firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Google User',
           provider: 'google',
         };
         setUser(googleUser);
