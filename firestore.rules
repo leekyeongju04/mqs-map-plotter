@@ -11,7 +11,7 @@ service cloud.firestore {
     }
 
     function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+      return (isSignedIn() && request.auth.uid == userId) || (!isSignedIn() && userId is string && userId.size() > 0 && userId.size() <= 128);
     }
 
     function isValidId(id) {
@@ -52,6 +52,14 @@ service cloud.firestore {
         data.userId == userId;
     }
 
+    function isValidMap(data, userId) {
+      return data.keys().hasAll(['id', 'name', 'width', 'height', 'userId']) &&
+        data.id is string && data.id.size() <= 64 &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+        data.width is number && data.height is number &&
+        data.userId == userId;
+    }
+
     match /users/{userId} {
       allow read, write: if isOwner(userId);
 
@@ -67,6 +75,19 @@ service cloud.firestore {
         allow create: if isOwner(userId) && isValidId(categoryId) && isValidCategory(incoming(), userId);
         allow update: if isOwner(userId) && isValidId(categoryId) && isValidCategory(incoming(), userId) && incoming().userId == existing().userId;
         allow delete: if isOwner(userId) && isValidId(categoryId);
+      }
+
+      match /maps/{mapId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(mapId) && isValidMap(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(mapId) && isValidMap(incoming(), userId) && incoming().userId == existing().userId;
+        allow delete: if isOwner(userId) && isValidId(mapId);
+
+        match /chunks/{chunkId} {
+          allow get, list: if isOwner(userId);
+          allow create, update: if isOwner(userId) && isValidId(chunkId) && incoming().userId == userId;
+          allow delete: if isOwner(userId) && isValidId(chunkId);
+        }
       }
     }
   }

@@ -31,10 +31,22 @@ export interface MapData {
   width: number;
   height: number;
   isCustom: boolean;
+  userId: string;
+  createdAt: string;
+  chunkCount?: number;
+  totalSize?: number;
 }
 
 export interface ViewportTransform {
   x: number;
   y: number;
   scale: number;
+}
+
+export interface UserAccount {
+  uid: string;
+  email?: string | null;
+  displayName?: string | null;
+  isAnonymous?: boolean;
+  provider: 'google' | 'account';
 }

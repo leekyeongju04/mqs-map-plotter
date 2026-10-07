@@ -1,5 +1,5 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInAnonymously, signOut } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -68,4 +68,4 @@ export async function testConnection() {
 // Perform non-blocking initial connection test
 testConnection();
 
-export { signInWithPopup, signOut };
+export { signInWithPopup, signInAnonymously, signOut };

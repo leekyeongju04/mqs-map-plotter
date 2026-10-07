@@ -10,17 +10,17 @@ import {
   Trash2,
   Edit2,
   MapPin,
-  ExternalLink,
   Layers,
-  Calendar,
   Crosshair,
-  FileText,
+  Map as MapIcon,
 } from 'lucide-react';
 
 interface DashboardProps {
   pins: Pin[];
   categories: Category[];
   activeMap: MapData;
+  mapsList: Omit<MapData, 'url'>[];
+  onSelectMap: (mapId: string) => void;
   onLocatePinOnMap: (pin: Pin) => void;
   onEditPin: (pin: Pin) => void;
   onDeletePin: (pinId: string) => void;
@@ -34,6 +34,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   pins,
   categories,
   activeMap,
+  mapsList,
+  onSelectMap,
   onLocatePinOnMap,
   onEditPin,
   onDeletePin,
@@ -44,6 +46,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all');
+  const [selectedMapFilter, setSelectedMapFilter] = useState('all');
   const [sortField, setSortField] = useState<'name' | 'date' | 'x' | 'y'>('date');
   const [sortAsc, setSortAsc] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -60,7 +63,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       const matchesCat =
         selectedCategoryFilter === 'all' || pin.categoryId === selectedCategoryFilter;
 
-      return matchesSearch && matchesCat;
+      const matchesMap =
+        selectedMapFilter === 'all' || pin.mapId === selectedMapFilter;
+
+      return matchesSearch && matchesCat && matchesMap;
     })
     .sort((a, b) => {
       if (sortField === 'name') {
@@ -72,7 +78,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       if (sortField === 'y') {
         return sortAsc ? a.pixelY - b.pixelY : b.pixelY - a.pixelY;
       }
-      // Date sort
       const tA = new Date(a.createdAt).getTime();
       const tB = new Date(b.createdAt).getTime();
       return sortAsc ? tA - tB : tB - tA;
@@ -92,7 +97,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           onImportData({ pins: parsed });
         }
       } catch (err) {
-        alert('Invalid JSON file format.');
+        console.error('Invalid JSON file format', err);
       }
     };
     reader.readAsText(file);
@@ -108,15 +113,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
             Personal Coordinates Dashboard
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Manage your saved landmark coordinates, export backups, and inspect locations.
+            Manage your saved landmark coordinates across all maps, export backups, and inspect locations.
           </p>
         </div>
 
         {/* Quick Action Tools */}
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => exportDataAsJson(pins, categories)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+            onClick={() => exportDataAsJson(pins, categories, mapsList)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
             title="Export all pins and categories to JSON"
           >
             <Download className="w-3.5 h-3.5" />
@@ -132,7 +137,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
             title="Import coordinates from backup JSON"
           >
             <Upload className="w-3.5 h-3.5" />
@@ -141,7 +146,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           <button
             onClick={onOpenCategoryModal}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors shadow-xs"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors shadow-xs cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>New Category</span>
@@ -158,7 +163,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </span>
         </div>
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <span className="text-xs text-slate-400 block font-medium">Categories</span>
+          <span className="text-xs text-slate-400 block font-medium">Custom Categories</span>
           <span className="text-2xl font-bold text-slate-900 font-mono tabular-nums">
             {categories.length}
           </span>
@@ -170,52 +175,57 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </span>
         </div>
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-          <span className="text-xs text-slate-400 block font-medium">Map Resolution</span>
-          <span className="text-sm font-semibold text-slate-900 font-mono tabular-nums block mt-1">
-            {activeMap.width} × {activeMap.height} px
+          <span className="text-xs text-slate-400 block font-medium">Maps Stored</span>
+          <span className="text-2xl font-bold text-slate-900 font-mono tabular-nums">
+            {mapsList.length || 1}
           </span>
         </div>
       </div>
 
-      {/* Categories Bar */}
+      {/* User Defined Categories Bar */}
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-2.5">
           <h3 className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
             <Layers className="w-3.5 h-3.5 text-slate-500" />
-            <span>User Defined Categories</span>
+            <span>Custom Categories ({categories.length})</span>
           </h3>
           <button
             onClick={onOpenCategoryModal}
-            className="text-xs text-sky-600 hover:text-sky-700 font-medium flex items-center gap-1"
+            className="text-xs text-sky-600 hover:text-sky-700 font-medium flex items-center gap-1 cursor-pointer"
           >
             <Plus className="w-3 h-3" />
-            <span>Add Category</span>
+            <span>Create Category</span>
           </button>
         </div>
-        <div className="flex flex-wrap gap-2">
-          {categories.map((cat) => {
-            const count = pins.filter((p) => p.categoryId === cat.id).length;
-            return (
-              <div
-                key={cat.id}
-                className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200/80 rounded-lg text-xs"
-              >
-                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: cat.color }} />
-                <span className="font-medium text-slate-800">{cat.name}</span>
-                <span className="text-slate-400 font-mono text-[10px]">({count})</span>
-                {cat.userId !== 'default' && (
+
+        {categories.length === 0 ? (
+          <p className="text-xs text-slate-400 italic">
+            No categories created yet. Click "+ Create Category" to organize your landmark pins.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {categories.map((cat) => {
+              const count = pins.filter((p) => p.categoryId === cat.id).length;
+              return (
+                <div
+                  key={cat.id}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200/80 rounded-lg text-xs"
+                >
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: cat.color }} />
+                  <span className="font-medium text-slate-800">{cat.name}</span>
+                  <span className="text-slate-400 font-mono text-[10px]">({count})</span>
                   <button
                     onClick={() => onDeleteCategory(cat.id)}
-                    className="text-slate-300 hover:text-red-500 transition-colors ml-1"
+                    className="text-slate-300 hover:text-red-500 transition-colors ml-1 cursor-pointer"
                     title="Delete custom category"
                   >
                     <Trash2 className="w-3 h-3" />
                   </button>
-                )}
-              </div>
-            );
-          })}
-        </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Search & Filter Header */}
@@ -232,20 +242,40 @@ export const Dashboard: React.FC<DashboardProps> = ({
           />
         </div>
 
-        {/* Category Filter & Sorting */}
-        <div className="flex items-center gap-2">
+        {/* Map Filter & Category Filter & Sorting */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Map Filter */}
           <select
-            value={selectedCategoryFilter}
-            onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+            value={selectedMapFilter}
+            onChange={(e) => setSelectedMapFilter(e.target.value)}
             className="px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
           >
-            <option value="all">All Categories ({pins.length})</option>
-            {categories.map((cat) => (
-              <option key={cat.id} value={cat.id}>
-                {cat.name}
-              </option>
-            ))}
+            <option value="all">All Maps ({pins.length} pins)</option>
+            {mapsList.map((m) => {
+              const count = pins.filter((p) => p.mapId === m.id).length;
+              return (
+                <option key={m.id} value={m.id}>
+                  {m.name} ({count} pins)
+                </option>
+              );
+            })}
           </select>
+
+          {/* Category Filter */}
+          {categories.length > 0 && (
+            <select
+              value={selectedCategoryFilter}
+              onChange={(e) => setSelectedCategoryFilter(e.target.value)}
+              className="px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+            >
+              <option value="all">All Categories</option>
+              {categories.map((cat) => (
+                <option key={cat.id} value={cat.id}>
+                  {cat.name}
+                </option>
+              ))}
+            </select>
+          )}
 
           <select
             value={sortField}
@@ -266,15 +296,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div className="w-12 h-12 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center mx-auto mb-3">
             <MapPin className="w-6 h-6" />
           </div>
-          <h3 className="text-base font-semibold text-slate-900 mb-1">No landmark pins plotted</h3>
+          <h3 className="text-base font-semibold text-slate-900 mb-1">No landmark pins found</h3>
           <p className="text-xs text-slate-500 max-w-sm mx-auto mb-4">
-            {searchQuery
+            {searchQuery || selectedCategoryFilter !== 'all' || selectedMapFilter !== 'all'
               ? 'No pins matched your current filter criteria.'
-              : 'You have not placed any pins yet. Go to the Map view to plot key landmarks on Wingfril Island!'}
+              : 'You have not placed any pins yet. Go to the Map view to plot key landmarks!'}
           </p>
           <button
             onClick={onSwitchToMap}
-            className="px-4 py-2 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-700 rounded-lg transition-colors shadow-xs"
+            className="px-4 py-2 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-700 rounded-lg transition-colors shadow-xs cursor-pointer"
           >
             Go to Map Plotter
           </button>
@@ -286,6 +316,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <thead className="bg-slate-50 text-slate-600 font-medium border-b border-slate-200">
                 <tr>
                   <th className="py-3 px-4">Landmark Name</th>
+                  <th className="py-3 px-3">Map</th>
                   <th className="py-3 px-3">Category</th>
                   <th className="py-3 px-3">Pixel Coords (X, Y)</th>
                   <th className="py-3 px-3">Normalized (X%, Y%)</th>
@@ -295,77 +326,88 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredPins.map((pin) => (
-                  <tr key={pin.id} className="hover:bg-slate-50/80 transition-colors group">
-                    <td className="py-3 px-4">
-                      <div className="flex items-center gap-2.5">
-                        <div
-                          className="w-7 h-7 rounded-lg flex items-center justify-center text-white shrink-0 shadow-xs"
-                          style={{ backgroundColor: pin.color }}
-                        >
-                          <PinIcon name={pin.icon} className="w-3.5 h-3.5" />
-                        </div>
-                        <div>
-                          <span className="font-semibold text-slate-900 block">{pin.name}</span>
-                        </div>
-                      </div>
-                    </td>
+                {filteredPins.map((pin) => {
+                  const mapInfo = mapsList.find((m) => m.id === pin.mapId);
+                  const mapDisplayName = mapInfo ? mapInfo.name : 'Wingfril Island Beach';
 
-                    <td className="py-3 px-3">
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className="w-2 h-2 rounded-full shrink-0"
-                          style={{ backgroundColor: pin.color }}
-                        />
-                        <span className="text-slate-700 truncate max-w-[120px]">
-                          {pin.categoryName}
+                  return (
+                    <tr key={pin.id} className="hover:bg-slate-50/80 transition-colors group">
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className="w-7 h-7 rounded-lg flex items-center justify-center text-white shrink-0 shadow-xs"
+                            style={{ backgroundColor: pin.color }}
+                          >
+                            <PinIcon name={pin.icon} className="w-3.5 h-3.5" />
+                          </div>
+                          <div>
+                            <span className="font-semibold text-slate-900 block">{pin.name}</span>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-3">
+                        <span className="text-slate-600 font-medium truncate max-w-[130px] block">
+                          {mapDisplayName}
                         </span>
-                      </div>
-                    </td>
+                      </td>
 
-                    <td className="py-3 px-3 font-mono font-medium text-slate-800 tabular-nums">
-                      {pin.pixelX}, {pin.pixelY}
-                    </td>
+                      <td className="py-3 px-3">
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className="w-2 h-2 rounded-full shrink-0"
+                            style={{ backgroundColor: pin.color }}
+                          />
+                          <span className="text-slate-700 truncate max-w-[120px]">
+                            {pin.categoryName || 'General'}
+                          </span>
+                        </div>
+                      </td>
 
-                    <td className="py-3 px-3 font-mono text-slate-600 tabular-nums">
-                      {pin.xPercent.toFixed(1)}%, {pin.yPercent.toFixed(1)}%
-                    </td>
+                      <td className="py-3 px-3 font-mono font-medium text-slate-800 tabular-nums">
+                        {pin.pixelX}, {pin.pixelY}
+                      </td>
 
-                    <td className="py-3 px-3 text-slate-500 max-w-xs truncate">
-                      {pin.description || <span className="text-slate-300 italic">—</span>}
-                    </td>
+                      <td className="py-3 px-3 font-mono text-slate-600 tabular-nums">
+                        {pin.xPercent.toFixed(1)}%, {pin.yPercent.toFixed(1)}%
+                      </td>
 
-                    <td className="py-3 px-3 text-slate-400 font-mono text-[11px] whitespace-nowrap">
-                      {new Date(pin.createdAt).toLocaleDateString()}
-                    </td>
+                      <td className="py-3 px-3 text-slate-500 max-w-xs truncate">
+                        {pin.description || <span className="text-slate-300 italic">—</span>}
+                      </td>
 
-                    <td className="py-3 px-4 text-right whitespace-nowrap">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => onLocatePinOnMap(pin)}
-                          className="p-1.5 text-slate-600 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-colors"
-                          title="Locate on Map"
-                        >
-                          <Crosshair className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => onEditPin(pin)}
-                          className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
-                          title="Edit Pin"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => onDeletePin(pin.id)}
-                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Delete Pin"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      <td className="py-3 px-3 text-slate-400 font-mono text-[11px] whitespace-nowrap">
+                        {new Date(pin.createdAt).toLocaleDateString()}
+                      </td>
+
+                      <td className="py-3 px-4 text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => onLocatePinOnMap(pin)}
+                            className="p-1.5 text-slate-600 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-colors cursor-pointer"
+                            title="Locate on Map"
+                          >
+                            <Crosshair className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => onEditPin(pin)}
+                            className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                            title="Edit Pin"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => onDeletePin(pin.id)}
+                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                            title="Delete Pin"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -1,18 +1,34 @@
-import { Pin, Category, MapData } from '../types';
+import { Pin, Category, MapData, UserAccount } from '../types';
 
-export const DEFAULT_CATEGORIES: Category[] = [
-  { id: 'cat-npc', name: 'NPC & Merchants', color: '#10B981', icon: 'User', userId: 'default', createdAt: new Date().toISOString() },
-  { id: 'cat-monster', name: 'Boss & Monsters', color: '#EF4444', icon: 'Skull', userId: 'default', createdAt: new Date().toISOString() },
-  { id: 'cat-portal', name: 'Portals & Docks', color: '#8B5CF6', icon: 'Navigation', userId: 'default', createdAt: new Date().toISOString() },
-  { id: 'cat-chest', name: 'Chests & Treasures', color: '#F59E0B', icon: 'Sparkles', userId: 'default', createdAt: new Date().toISOString() },
-  { id: 'cat-quest', name: 'Quest Locations', color: '#3B82F6', icon: 'Flag', userId: 'default', createdAt: new Date().toISOString() },
-  { id: 'cat-poi', name: 'Points of Interest', color: '#EC4899', icon: 'Landmark', userId: 'default', createdAt: new Date().toISOString() },
-  { id: 'cat-camp', name: 'Camps & Safe Zones', color: '#06B6D4', icon: 'Tent', userId: 'default', createdAt: new Date().toISOString() },
-];
+// Pre-added categories are empty per user request
+export const DEFAULT_CATEGORIES: Category[] = [];
 
 const LOCAL_PINS_KEY = 'mqs_map_pins_local';
 const LOCAL_CATEGORIES_KEY = 'mqs_map_categories_local';
-const LOCAL_SAVED_MAP_META = 'mqs_active_map_metadata';
+const LOCAL_MAPS_LIST_KEY = 'mqs_maps_list_local';
+const LOCAL_ACTIVE_MAP_KEY = 'mqs_active_map_id';
+const LOCAL_ACCOUNT_KEY = 'mqs_user_account';
+
+export function getLocalAccount(): UserAccount | null {
+  try {
+    const raw = localStorage.getItem(LOCAL_ACCOUNT_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+export function saveLocalAccount(account: UserAccount | null) {
+  try {
+    if (account) {
+      localStorage.setItem(LOCAL_ACCOUNT_KEY, JSON.stringify(account));
+    } else {
+      localStorage.removeItem(LOCAL_ACCOUNT_KEY);
+    }
+  } catch (e) {
+    console.error('Failed to save local account', e);
+  }
+}
 
 export function getLocalPins(): Pin[] {
   try {
@@ -32,42 +48,69 @@ export function saveLocalPins(pins: Pin[]) {
   }
 }
 
+// Purge any legacy pre-added hardcoded categories
+const LEGACY_CATEGORY_IDS = new Set([
+  'cat-npc',
+  'cat-monster',
+  'cat-portal',
+  'cat-chest',
+  'cat-camp',
+  'cat-hazard',
+  'cat-quest',
+  'cat-landmark',
+]);
+
 export function getLocalCategories(): Category[] {
   try {
     const raw = localStorage.getItem(LOCAL_CATEGORIES_KEY);
-    return raw ? JSON.parse(raw) : DEFAULT_CATEGORIES;
+    if (!raw) return [];
+    const parsed: Category[] = JSON.parse(raw);
+    const userOnly = parsed.filter((c) => !LEGACY_CATEGORY_IDS.has(c.id));
+    if (userOnly.length !== parsed.length) {
+      saveLocalCategories(userOnly);
+    }
+    return userOnly;
   } catch (e) {
     console.error('Failed to load local categories', e);
-    return DEFAULT_CATEGORIES;
+    return [];
   }
 }
 
 export function saveLocalCategories(cats: Category[]) {
   try {
-    localStorage.setItem(LOCAL_CATEGORIES_KEY, JSON.stringify(cats));
+    const userOnly = cats.filter((c) => !LEGACY_CATEGORY_IDS.has(c.id));
+    localStorage.setItem(LOCAL_CATEGORIES_KEY, JSON.stringify(userOnly));
   } catch (e) {
     console.error('Failed to save local categories', e);
   }
 }
 
-export function getSavedMapMeta(): Omit<MapData, 'url'> | null {
+export function getLocalMapsList(): Omit<MapData, 'url'>[] {
   try {
-    const raw = localStorage.getItem(LOCAL_SAVED_MAP_META);
-    return raw ? JSON.parse(raw) : null;
+    const raw = localStorage.getItem(LOCAL_MAPS_LIST_KEY);
+    return raw ? JSON.parse(raw) : [];
   } catch (e) {
-    return null;
+    return [];
   }
 }
 
-export function saveSavedMapMeta(meta: Omit<MapData, 'url'>) {
+export function saveLocalMapsList(maps: Omit<MapData, 'url'>[]) {
   try {
-    localStorage.setItem(LOCAL_SAVED_MAP_META, JSON.stringify(meta));
+    localStorage.setItem(LOCAL_MAPS_LIST_KEY, JSON.stringify(maps));
   } catch (e) {
-    console.error('Failed to save map metadata', e);
+    console.error('Failed to save local maps list', e);
   }
 }
 
-// IndexedDB helper for storing uploaded map images safely without compression
+export function getActiveMapId(): string | null {
+  return localStorage.getItem(LOCAL_ACTIVE_MAP_KEY);
+}
+
+export function saveActiveMapId(id: string) {
+  localStorage.setItem(LOCAL_ACTIVE_MAP_KEY, id);
+}
+
+// IndexedDB helper for storing uncompressed map images safely
 const DB_NAME = 'mqs_map_plotter_db';
 const STORE_NAME = 'map_assets';
 
@@ -131,13 +174,18 @@ export async function deleteCustomMapImage(id: string): Promise<void> {
   }
 }
 
-export function exportDataAsJson(pins: Pin[], categories: Category[]): void {
+export function exportDataAsJson(
+  pins: Pin[],
+  categories: Category[],
+  maps?: Omit<MapData, 'url'>[]
+): void {
   const exportPayload = {
     version: '1.0',
     title: 'MQS Map Plotter Export',
     exportedAt: new Date().toISOString(),
     pins,
     categories,
+    maps: maps || [],
   };
   const jsonStr = JSON.stringify(exportPayload, null, 2);
   const blob = new Blob([jsonStr], { type: 'application/json' });

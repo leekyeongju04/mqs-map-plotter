@@ -31,33 +31,37 @@ export const Solver: React.FC<SolverProps> = ({
   const [pinAId, setPinAId] = useState<string>('');
   const [pinBId, setPinBId] = useState<string>('');
 
+  // Filter pins for the active map (or all if none)
+  const mapPins = pins.filter((p) => !p.mapId || p.mapId === activeMap.id);
+  const relevantPins = mapPins.length > 0 ? mapPins : pins;
+
   useEffect(() => {
     if (initialPinForSolve) {
       setTargetX(initialPinForSolve.pixelX);
       setTargetY(initialPinForSolve.pixelY);
       setPinAId(initialPinForSolve.id);
-    } else if (pins.length > 0) {
-      if (!pinAId) setPinAId(pins[0].id);
-      if (!pinBId && pins.length > 1) setPinBId(pins[1].id);
+    } else if (relevantPins.length > 0) {
+      if (!pinAId || !relevantPins.some((p) => p.id === pinAId)) setPinAId(relevantPins[0].id);
+      if (!pinBId && relevantPins.length > 1) setPinBId(relevantPins[1].id);
     }
-  }, [initialPinForSolve, pins]);
+  }, [initialPinForSolve, relevantPins]);
 
   // Recalculate nearest landmarks
   useEffect(() => {
     const results = findNearestLandmarks(
       targetX,
       targetY,
-      pins,
+      relevantPins,
       activeMap.width,
       activeMap.height,
       6
     );
     setNearestResults(results);
-  }, [targetX, targetY, pins, activeMap]);
+  }, [targetX, targetY, relevantPins, activeMap]);
 
   // Two-point calculations
-  const pinA = pins.find((p) => p.id === pinAId);
-  const pinB = pins.find((p) => p.id === pinBId);
+  const pinA = relevantPins.find((p) => p.id === pinAId) || pins.find((p) => p.id === pinAId);
+  const pinB = relevantPins.find((p) => p.id === pinBId) || pins.find((p) => p.id === pinBId);
 
   let pointDistance: { euclidean: number; manhattan: number } | null = null;
   let pointBearing = '';
@@ -143,14 +147,14 @@ export const Solver: React.FC<SolverProps> = ({
             <div>
               <span className="block text-[11px] text-slate-400 mb-1">Or sample from saved pin:</span>
               <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
-                {pins.slice(0, 8).map((p) => (
+                {relevantPins.slice(0, 8).map((p) => (
                   <button
                     key={p.id}
                     onClick={() => {
                       setTargetX(p.pixelX);
                       setTargetY(p.pixelY);
                     }}
-                    className="px-2 py-1 text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md transition-colors truncate max-w-[140px]"
+                    className="px-2 py-1 text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md transition-colors truncate max-w-[140px] cursor-pointer"
                   >
                     {p.name}
                   </button>
@@ -231,7 +235,7 @@ export const Solver: React.FC<SolverProps> = ({
                 onChange={(e) => setPinAId(e.target.value)}
                 className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
               >
-                {pins.map((p) => (
+                {relevantPins.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name} ({p.pixelX}, {p.pixelY})
                   </option>
@@ -249,7 +253,7 @@ export const Solver: React.FC<SolverProps> = ({
                 onChange={(e) => setPinBId(e.target.value)}
                 className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
               >
-                {pins.map((p) => (
+                {relevantPins.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name} ({p.pixelX}, {p.pixelY})
                   </option>

@@ -9,36 +9,39 @@ import {
   RotateCcw,
   Search,
   Upload,
-  Image as ImageIcon,
   Crosshair,
   FileImage,
   ArrowUpCircle,
+  Layers,
+  MapPin,
 } from 'lucide-react';
 
 interface MapPlotterProps {
   pins: Pin[];
   categories: Category[];
   activeMap: MapData;
-  onUpdateMap: (newMap: MapData) => void;
+  onUploadMapFile: (file: File, name: string) => void;
   onOpenPinModal: (coords: { xPercent: number; yPercent: number; pixelX: number; pixelY: number }) => void;
   onEditPin: (pin: Pin) => void;
   onDeletePin: (pinId: string) => void;
   onSolveForPin?: (pin: Pin) => void;
   selectedPinId?: string | null;
   onSelectPin?: (pin: Pin | null) => void;
+  onOpenMapManager?: () => void;
 }
 
 export const MapPlotter: React.FC<MapPlotterProps> = ({
   pins,
   categories,
   activeMap,
-  onUpdateMap,
+  onUploadMapFile,
   onOpenPinModal,
   onEditPin,
   onDeletePin,
   onSolveForPin,
   selectedPinId,
   onSelectPin,
+  onOpenMapManager,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -50,6 +53,9 @@ export const MapPlotter: React.FC<MapPlotterProps> = ({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [isDropPinMode, setIsDropPinMode] = useState(false);
   const [isDragOverWindow, setIsDragOverWindow] = useState(false);
+
+  // Pin scope filter: 'current' (pins on this map) vs 'all' (all saved pins)
+  const [pinScope, setPinScope] = useState<'current' | 'all'>('current');
 
   // Filtering state
   const [searchQuery, setSearchQuery] = useState('');
@@ -95,72 +101,60 @@ export const MapPlotter: React.FC<MapPlotterProps> = ({
     const mapW = activeMap.width || 2048;
     const mapH = activeMap.height || 2048;
 
-    const scaleX = (container.width * 0.95) / mapW;
-    const scaleY = (container.height * 0.95) / mapH;
-    const initialScale = Math.min(scaleX, scaleY, 1);
+    const scaleX = (container.width * 0.92) / mapW;
+    const scaleY = (container.height * 0.92) / mapH;
+    const initialScale = Math.min(scaleX, scaleY, 1.0);
 
-    const x = (container.width - mapW * initialScale) / 2;
-    const y = (container.height - mapH * initialScale) / 2;
+    const initialX = (container.width - mapW * initialScale) / 2;
+    const initialY = (container.height - mapH * initialScale) / 2;
 
-    setTransform({ x, y, scale: initialScale });
-  }, [activeMap]);
+    setTransform({
+      x: initialX,
+      y: initialY,
+      scale: initialScale,
+    });
+  }, [activeMap.url, activeMap.width, activeMap.height]);
 
   useEffect(() => {
-    if (activeMap.url) {
-      fitToScreen();
-    }
-  }, [activeMap.url, fitToScreen]);
+    fitToScreen();
+  }, [fitToScreen]);
 
-  // Handle Zoom In / Out
-  const handleZoom = (direction: 'in' | 'out', factor = 1.25) => {
+  // Zoom handler
+  const handleZoom = (direction: 'in' | 'out', clientX?: number, clientY?: number) => {
+    const factor = direction === 'in' ? 1.25 : 0.8;
     setTransform((prev) => {
-      const newScale = direction === 'in' ? prev.scale * factor : prev.scale / factor;
-      const clampedScale = Math.min(Math.max(newScale, 0.15), 6.0);
+      const newScale = Math.min(Math.max(prev.scale * factor, 0.1), 6.0);
+      if (clientX !== undefined && clientY !== undefined && containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        const mouseX = clientX - rect.left;
+        const mouseY = clientY - rect.top;
 
-      if (!containerRef.current) return { ...prev, scale: clampedScale };
-      const rect = containerRef.current.getBoundingClientRect();
-      const centerX = rect.width / 2;
-      const centerY = rect.height / 2;
+        const newX = mouseX - (mouseX - prev.x) * (newScale / prev.scale);
+        const newY = mouseY - (mouseY - prev.y) * (newScale / prev.scale);
 
-      const scaleChange = clampedScale / prev.scale;
-      const newX = centerX - (centerX - prev.x) * scaleChange;
-      const newY = centerY - (centerY - prev.y) * scaleChange;
-
-      return { x: newX, y: newY, scale: clampedScale };
+        return { x: newX, y: newY, scale: newScale };
+      }
+      return { ...prev, scale: newScale };
     });
   };
 
   // Mouse Wheel Zoom
   const handleWheel = (e: React.WheelEvent) => {
-    if (!activeMap.url) return;
     e.preventDefault();
-    const zoomFactor = e.deltaY < 0 ? 1.15 : 0.85;
-
-    setTransform((prev) => {
-      const newScale = Math.min(Math.max(prev.scale * zoomFactor, 0.15), 6.0);
-      if (!containerRef.current) return { ...prev, scale: newScale };
-
-      const rect = containerRef.current.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
-
-      const scaleChange = newScale / prev.scale;
-      const newX = mouseX - (mouseX - prev.x) * scaleChange;
-      const newY = mouseY - (mouseY - prev.y) * scaleChange;
-
-      return { x: newX, y: newY, scale: newScale };
-    });
+    const direction = e.deltaY < 0 ? 'in' : 'out';
+    handleZoom(direction, e.clientX, e.clientY);
   };
 
-  // Drag Panning Handlers
+  // Mouse Pan Handlers
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (e.button !== 0 || !activeMap.url) return;
+    if (e.button !== 0) return; // Left click only
     setIsDragging(true);
     setDragStart({ x: e.clientX - transform.x, y: e.clientY - transform.y });
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (isDragging && activeMap.url) {
+    // 1. Drag Panning
+    if (isDragging) {
       setTransform((prev) => ({
         ...prev,
         x: e.clientX - dragStart.x,
@@ -168,24 +162,24 @@ export const MapPlotter: React.FC<MapPlotterProps> = ({
       }));
     }
 
-    // Update live coordinate tracker
-    if (containerRef.current && activeMap.url) {
-      const rect = containerRef.current.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
+    // 2. Track Coordinates on the Map Canvas
+    if (imageRef.current) {
+      const rect = imageRef.current.getBoundingClientRect();
+      const relativeX = e.clientX - rect.left;
+      const relativeY = e.clientY - rect.top;
 
-      const mapPixelX = (mouseX - transform.x) / transform.scale;
-      const mapPixelY = (mouseY - transform.y) / transform.scale;
+      if (relativeX >= 0 && relativeX <= rect.width && relativeY >= 0 && relativeY <= rect.height) {
+        const xPercent = (relativeX / rect.width) * 100;
+        const yPercent = (relativeY / rect.height) * 100;
 
-      const mapW = activeMap.width || 2048;
-      const mapH = activeMap.height || 2048;
+        const pixelX = Math.round((xPercent / 100) * (activeMap.width || 2048));
+        const pixelY = Math.round((yPercent / 100) * (activeMap.height || 2048));
 
-      if (mapPixelX >= 0 && mapPixelX <= mapW && mapPixelY >= 0 && mapPixelY <= mapH) {
         setCursorCoords({
-          pixelX: Math.round(mapPixelX),
-          pixelY: Math.round(mapPixelY),
-          xPercent: Math.round((mapPixelX / mapW) * 1000) / 10,
-          yPercent: Math.round((mapPixelY / mapH) * 1000) / 10,
+          pixelX,
+          pixelY,
+          xPercent: Math.round(xPercent * 10) / 10,
+          yPercent: Math.round(yPercent * 10) / 10,
         });
       } else {
         setCursorCoords(null);
@@ -197,7 +191,7 @@ export const MapPlotter: React.FC<MapPlotterProps> = ({
     setIsDragging(false);
   };
 
-  // Touch Support
+  // Touch Support (Pinch to Zoom and Pan)
   const touchStartRef = useRef<{ dist: number; x: number; y: number } | null>(null);
 
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -235,7 +229,7 @@ export const MapPlotter: React.FC<MapPlotterProps> = ({
       const factor = dist / touchStartRef.current.dist;
 
       setTransform((prev) => {
-        const newScale = Math.min(Math.max(prev.scale * factor, 0.15), 6.0);
+        const newScale = Math.min(Math.max(prev.scale * factor, 0.1), 6.0);
         return { ...prev, scale: newScale };
       });
       touchStartRef.current.dist = dist;
@@ -260,36 +254,9 @@ export const MapPlotter: React.FC<MapPlotterProps> = ({
     }
   };
 
-  const handleMapDoubleClick = (e: React.MouseEvent) => {
-    if (cursorCoords) {
-      onOpenPinModal({
-        xPercent: cursorCoords.xPercent,
-        yPercent: cursorCoords.yPercent,
-        pixelX: cursorCoords.pixelX,
-        pixelY: cursorCoords.pixelY,
-      });
-    }
-  };
-
-  // Process uploaded image without compression
+  // File Upload Handlers (Preserves 100% uncompressed quality)
   const processImageFile = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const dataUrl = event.target?.result as string;
-      const img = new Image();
-      img.onload = () => {
-        onUpdateMap({
-          id: `map-${Date.now()}`,
-          name: file.name.replace(/\.[^/.]+$/, ''),
-          url: dataUrl,
-          width: img.naturalWidth || 2048,
-          height: img.naturalHeight || 2048,
-          isCustom: true,
-        });
-      };
-      img.src = dataUrl;
-    };
-    reader.readAsDataURL(file);
+    onUploadMapFile(file, file.name.replace(/\.[^/.]+$/, ''));
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -300,7 +267,6 @@ export const MapPlotter: React.FC<MapPlotterProps> = ({
     e.target.value = '';
   };
 
-  // Drag and drop events on canvas
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOverWindow(true);
@@ -308,6 +274,7 @@ export const MapPlotter: React.FC<MapPlotterProps> = ({
 
   const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
+    if (e.currentTarget.contains(e.relatedTarget as Node)) return;
     setIsDragOverWindow(false);
   };
 
@@ -320,8 +287,12 @@ export const MapPlotter: React.FC<MapPlotterProps> = ({
     }
   };
 
+  // Filter pins based on scope ('current' vs 'all')
+  const currentMapPins = pins.filter((p) => p.mapId === activeMap.id);
+  const scopedPins = pinScope === 'current' ? (currentMapPins.length > 0 ? currentMapPins : pins) : pins;
+
   // Filter Pins based on search and category
-  const filteredPins = pins.filter((pin) => {
+  const filteredPins = scopedPins.filter((pin) => {
     const matchesSearch =
       searchQuery.trim() === '' ||
       pin.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -354,9 +325,9 @@ export const MapPlotter: React.FC<MapPlotterProps> = ({
       {isDragOverWindow && (
         <div className="absolute inset-0 z-50 bg-sky-950/80 backdrop-blur-sm border-4 border-dashed border-sky-400 flex flex-col items-center justify-center text-white pointer-events-none animate-in fade-in duration-100">
           <ArrowUpCircle className="w-16 h-16 text-sky-400 animate-bounce mb-3" />
-          <h3 className="text-xl font-bold">Drop Wingfril_Island_Beach.webp Here</h3>
+          <h3 className="text-xl font-bold">Drop Map Image Here</h3>
           <p className="text-sm text-sky-200 mt-1">
-            Image will be loaded completely uncompressed at native resolution
+            Image will be loaded completely uncompressed and saved to your account
           </p>
         </div>
       )}
@@ -364,7 +335,7 @@ export const MapPlotter: React.FC<MapPlotterProps> = ({
       {/* Top Search & Filter Bar */}
       <div className="absolute top-3 left-3 right-3 z-20 flex flex-wrap items-center gap-2 pointer-events-none">
         {/* Search Input */}
-        <div className="pointer-events-auto bg-white/95 backdrop-blur-md rounded-xl shadow-md border border-slate-200/80 p-1.5 flex items-center gap-2 w-full sm:w-72">
+        <div className="pointer-events-auto bg-white/95 backdrop-blur-md rounded-xl shadow-md border border-slate-200/80 p-1.5 flex items-center gap-2 w-full sm:w-64">
           <Search className="w-4 h-4 text-slate-400 ml-1.5 shrink-0" />
           <input
             type="text"
@@ -376,45 +347,73 @@ export const MapPlotter: React.FC<MapPlotterProps> = ({
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="text-[11px] text-slate-400 hover:text-slate-600 px-1 font-mono"
+              className="text-[11px] text-slate-400 hover:text-slate-600 px-1 font-mono cursor-pointer"
             >
               clear
             </button>
           )}
         </div>
 
-        {/* Category Filters Carousel */}
-        <div className="pointer-events-auto flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full no-scrollbar">
+        {/* Map Pin Scope Toggle: This Map vs All Saved Pins */}
+        <div className="pointer-events-auto bg-slate-900/90 backdrop-blur-md rounded-xl p-0.5 border border-slate-800 flex items-center shadow-md">
           <button
-            onClick={() => setSelectedCategoryFilter('all')}
-            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shadow-xs ${
-              selectedCategoryFilter === 'all'
-                ? 'bg-white text-slate-900 font-semibold'
-                : 'bg-slate-900/90 text-slate-300 hover:bg-slate-800 border border-slate-700/80'
+            onClick={() => setPinScope('current')}
+            className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+              pinScope === 'current'
+                ? 'bg-sky-600 text-white shadow-xs'
+                : 'text-slate-400 hover:text-white'
             }`}
+            title="Show pins for this map"
+          >
+            This Map ({currentMapPins.length})
+          </button>
+          <button
+            onClick={() => setPinScope('all')}
+            className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+              pinScope === 'all'
+                ? 'bg-sky-600 text-white shadow-xs'
+                : 'text-slate-400 hover:text-white'
+            }`}
+            title="Show all saved pins across all maps"
           >
             All Pins ({pins.length})
           </button>
-          {categories.map((cat) => {
-            const count = pins.filter((p) => p.categoryId === cat.id).length;
-            const isSelected = selectedCategoryFilter === cat.id;
-            return (
-              <button
-                key={cat.id}
-                onClick={() => setSelectedCategoryFilter(isSelected ? 'all' : cat.id)}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shadow-xs ${
-                  isSelected
-                    ? 'bg-white text-slate-900 font-semibold'
-                    : 'bg-slate-900/90 text-slate-300 hover:bg-slate-800 border border-slate-700/80'
-                }`}
-              >
-                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: cat.color }} />
-                <span>{cat.name}</span>
-                <span className="text-[10px] opacity-75 font-mono">({count})</span>
-              </button>
-            );
-          })}
         </div>
+
+        {/* Category Filters Carousel */}
+        {categories.length > 0 && (
+          <div className="pointer-events-auto flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full no-scrollbar">
+            <button
+              onClick={() => setSelectedCategoryFilter('all')}
+              className={`px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shadow-xs cursor-pointer ${
+                selectedCategoryFilter === 'all'
+                  ? 'bg-white text-slate-900 font-semibold'
+                  : 'bg-slate-900/90 text-slate-300 hover:bg-slate-800 border border-slate-700/80'
+              }`}
+            >
+              All Categories
+            </button>
+            {categories.map((cat) => {
+              const count = scopedPins.filter((p) => p.categoryId === cat.id).length;
+              const isSelected = selectedCategoryFilter === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  onClick={() => setSelectedCategoryFilter(isSelected ? 'all' : cat.id)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors whitespace-nowrap shadow-xs cursor-pointer ${
+                    isSelected
+                      ? 'bg-white text-slate-900 font-semibold'
+                      : 'bg-slate-900/90 text-slate-300 hover:bg-slate-800 border border-slate-700/80'
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: cat.color }} />
+                  <span>{cat.name}</span>
+                  <span className="text-[10px] opacity-75 font-mono">({count})</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Main Interactive Canvas OR Upload Dropzone */}
@@ -425,23 +424,29 @@ export const MapPlotter: React.FC<MapPlotterProps> = ({
               <FileImage className="w-8 h-8" />
             </div>
             <h3 className="text-lg font-bold text-white mb-2">
-              Load Wingfril Island Beach Map
+              Load Map Image: {activeMap.name}
             </h3>
             <p className="text-xs text-slate-400 mb-6 leading-relaxed">
-              Drop your <span className="text-sky-300 font-medium">Wingfril_Island_Beach.webp</span> image file here, or click below to select it from your device. It will be loaded completely uncompressed at native resolution and saved permanently in your browser.
+              Drop your map image file here (e.g. <span className="text-sky-300 font-medium">Wingfril_Island_Beach.webp</span>), or click below to select it from your device. It will be loaded completely uncompressed and saved directly to your account.
             </p>
 
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="w-full py-3 px-4 bg-sky-600 hover:bg-sky-500 text-white font-medium text-xs rounded-xl shadow-lg shadow-sky-900/30 transition-all flex items-center justify-center gap-2 mb-3 cursor-pointer"
+              className="w-full py-3 px-4 bg-sky-600 hover:bg-sky-500 text-white font-semibold text-xs rounded-xl shadow-lg shadow-sky-900/30 transition-all flex items-center justify-center gap-2 mb-3 cursor-pointer"
             >
               <Upload className="w-4 h-4" />
-              <span>Select Wingfril_Island_Beach.webp</span>
+              <span>Select Map Image File</span>
             </button>
 
-            <p className="text-[11px] text-slate-500">
-              Or drag & drop your map image anywhere onto this window
-            </p>
+            {onOpenMapManager && (
+              <button
+                onClick={onOpenMapManager}
+                className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Layers className="w-3.5 h-3.5 text-sky-400" />
+                <span>Switch to Another Saved Map</span>
+              </button>
+            )}
           </div>
         </div>
       ) : (
@@ -450,40 +455,39 @@ export const MapPlotter: React.FC<MapPlotterProps> = ({
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
+          onWheel={handleWheel}
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
-          onWheel={handleWheel}
-          onClick={handleMapClick}
-          onDoubleClick={handleMapDoubleClick}
-          className={`relative w-full h-full overflow-hidden ${
+          className={`relative flex-1 overflow-hidden select-none bg-slate-950 ${
             isDropPinMode ? 'cursor-crosshair' : isDragging ? 'cursor-grabbing' : 'cursor-grab'
           }`}
         >
-          {/* Transformed Map & Pins Layer */}
+          {/* Scalable & Pannable World Container */}
           <div
             style={{
-              transform: `translate3d(${transform.x}px, ${transform.y}px, 0) scale(${transform.scale})`,
+              transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.scale})`,
               transformOrigin: '0 0',
-              width: activeMap.width || 2048,
-              height: activeMap.height || 2048,
               willChange: 'transform',
             }}
             className="absolute top-0 left-0"
           >
-            {/* Map Image (Razor sharp pixelated rendering for pixel art) */}
+            {/* The Map Image */}
             <img
               ref={imageRef}
               src={activeMap.url}
               alt={activeMap.name}
               draggable={false}
+              onClick={handleMapClick}
+              className="max-w-none block shadow-2xl pointer-events-auto"
               style={{
-                imageRendering: 'pixelated',
+                width: `${activeMap.width}px`,
+                height: `${activeMap.height}px`,
+                imageRendering: 'auto',
               }}
-              className="w-full h-full object-contain pointer-events-none shadow-2xl rounded-xs select-none"
             />
 
-            {/* Plotted Pins */}
+            {/* Placed Pins Overlay */}
             {filteredPins.map((pin) => {
               const isHovered = hoveredPin?.id === pin.id;
               const isActive = activePin?.id === pin.id;
@@ -517,7 +521,7 @@ export const MapPlotter: React.FC<MapPlotterProps> = ({
                     style={{ backgroundColor: pin.color }}
                   >
                     <PinIcon name={pin.icon} className="w-4 h-4 text-white stroke-[2.5]" />
-                    {/* Pin Tail / Arrow Indicator */}
+                    {/* Pin Tail / Arrow */}
                     <div
                       className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 w-0 h-0 border-x-4 border-x-transparent border-t-6"
                       style={{ borderTopColor: pin.color }}
@@ -626,19 +630,21 @@ export const MapPlotter: React.FC<MapPlotterProps> = ({
               </div>
             </div>
 
-            {/* Map Switcher & Upload */}
+            {/* Map Switcher & Manage */}
             <div className="pointer-events-auto bg-white/95 backdrop-blur-md rounded-xl shadow-md border border-slate-200/90 p-2 flex items-center gap-2">
-              <div className="text-xs truncate max-w-[140px] sm:max-w-[200px] font-medium text-slate-800">
-                {activeMap.name} ({activeMap.width}×{activeMap.height})
+              <div className="text-xs truncate max-w-[140px] sm:max-w-[180px] font-semibold text-slate-800">
+                {activeMap.name}
               </div>
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="px-2 py-1 text-[11px] font-medium text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
-                title="Replace with another map image (.webp, .png, .jpg)"
-              >
-                <Upload className="w-3 h-3" />
-                <span>Replace Map</span>
-              </button>
+              {onOpenMapManager && (
+                <button
+                  onClick={onOpenMapManager}
+                  className="px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                  title="Switch between maps or upload new maps"
+                >
+                  <Layers className="w-3 h-3 text-sky-600" />
+                  <span>Switch Map</span>
+                </button>
+              )}
             </div>
           </div>
         </>

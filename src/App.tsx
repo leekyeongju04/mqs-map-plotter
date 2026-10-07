@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User as FirebaseUser, onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged } from 'firebase/auth';
 import {
   collection,
   doc,
@@ -10,41 +10,69 @@ import {
 import {
   auth,
   db,
-  googleProvider,
-  signInWithPopup,
   signOut,
   handleFirestoreError,
   OperationType,
 } from './firebase';
-import { Pin, Category, MapData } from './types';
+import { Pin, Category, MapData, UserAccount } from './types';
 import {
   getLocalPins,
   saveLocalPins,
   getLocalCategories,
   saveLocalCategories,
-  DEFAULT_CATEGORIES,
-  getSavedMapMeta,
-  saveSavedMapMeta,
-  getCustomMapImage,
+  getLocalMapsList,
+  saveLocalMapsList,
+  getActiveMapId,
+  saveActiveMapId,
   saveCustomMapImage,
+  getCustomMapImage,
+  deleteCustomMapImage,
+  getLocalAccount,
+  saveLocalAccount,
 } from './utils/storage';
+import {
+  uploadMapToFirestore,
+  fetchMapImageFromFirestore,
+  deleteMapFromFirestore,
+} from './utils/mapSync';
 import { Header } from './components/Header';
 import { MapPlotter } from './components/MapPlotter';
 import { Dashboard } from './components/Dashboard';
 import { Solver } from './components/Solver';
 import { PinModal } from './components/PinModal';
 import { CategoryModal } from './components/CategoryModal';
+import { MapManagerModal } from './components/MapManagerModal';
+import { AuthModal } from './components/AuthModal';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'map' | 'dashboard' | 'solver'>('map');
-  const [user, setUser] = useState<FirebaseUser | null>(null);
+
+  // Account state: either Google Auth or persistent Database Account
+  const [user, setUser] = useState<UserAccount | null>(() => getLocalAccount());
   const [authReady, setAuthReady] = useState(false);
 
-  // Pins & Categories state
+  // Pins & Categories state (Categories starts empty per user request)
   const [pins, setPins] = useState<Pin[]>(() => getLocalPins());
   const [categories, setCategories] = useState<Category[]>(() => getLocalCategories());
 
-  // Active Map state - initial starts as Wingfril Island Beach, loaded from IndexedDB if saved
+  // Maps List state (stores metadata of all maps)
+  const [mapsList, setMapsList] = useState<Omit<MapData, 'url'>[]>(() => {
+    const saved = getLocalMapsList();
+    if (saved.length > 0) return saved;
+    return [
+      {
+        id: 'wingfril-island',
+        name: 'Wingfril Island Beach',
+        width: 2048,
+        height: 2048,
+        isCustom: false,
+        userId: 'default',
+        createdAt: new Date().toISOString(),
+      },
+    ];
+  });
+
+  // Active Map state
   const [activeMap, setActiveMap] = useState<MapData>({
     id: 'wingfril-island',
     name: 'Wingfril Island Beach',
@@ -52,28 +80,17 @@ export default function App() {
     width: 2048,
     height: 2048,
     isCustom: false,
+    userId: 'default',
+    createdAt: new Date().toISOString(),
   });
 
-  // Restore saved map from IndexedDB on startup
-  useEffect(() => {
-    async function restoreMap() {
-      const meta = getSavedMapMeta();
-      if (meta) {
-        const dataUrl = await getCustomMapImage(meta.id);
-        if (dataUrl) {
-          setActiveMap({
-            ...meta,
-            url: dataUrl,
-          });
-        }
-      }
-    }
-    restoreMap();
-  }, []);
-
-  // Modal states
+  // Modals state
   const [isPinModalOpen, setIsPinModalOpen] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [isMapManagerOpen, setIsMapManagerOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isUploadingMap, setIsUploadingMap] = useState(false);
+
   const [pendingCoords, setPendingCoords] = useState<{
     xPercent: number;
     yPercent: number;
@@ -86,24 +103,51 @@ export default function App() {
   const [selectedPinId, setSelectedPinId] = useState<string | null>(null);
   const [initialPinForSolve, setInitialPinForSolve] = useState<Pin | null>(null);
 
-  // Listen to Auth State
+  // Listen to Firebase Auth state (e.g. Google Sign In)
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+      if (firebaseUser) {
+        const googleUser: UserAccount = {
+          uid: firebaseUser.uid,
+          email: firebaseUser.email,
+          displayName: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'Google User',
+          provider: 'google',
+        };
+        setUser(googleUser);
+        saveLocalAccount(googleUser);
+      }
       setAuthReady(true);
     });
     return () => unsubscribe();
   }, []);
 
-  // Listen to Firestore when user is authenticated
+  // Restore Active Map image on startup from IndexedDB or Firestore
   useEffect(() => {
-    if (!user) {
-      return;
+    async function restoreMap() {
+      const savedActiveId = getActiveMapId() || 'wingfril-island';
+      const targetMeta = mapsList.find((m) => m.id === savedActiveId) || mapsList[0];
+      if (targetMeta) {
+        let dataUrl = await getCustomMapImage(targetMeta.id);
+        if (!dataUrl && user) {
+          dataUrl = await fetchMapImageFromFirestore(user.uid, targetMeta.id);
+        }
+        setActiveMap({
+          ...targetMeta,
+          url: dataUrl || '',
+        });
+      }
     }
+    restoreMap();
+  }, [user, mapsList]);
+
+  // Sync with Firestore whenever user is logged in
+  useEffect(() => {
+    if (!user) return;
 
     const userId = user.uid;
     const pinsPath = `users/${userId}/pins`;
     const categoriesPath = `users/${userId}/categories`;
+    const mapsPath = `users/${userId}/maps`;
 
     // 1. Sync Pins from Firestore
     const unsubPins = onSnapshot(
@@ -118,6 +162,7 @@ export default function App() {
           setPins(cloudPins);
           saveLocalPins(cloudPins);
         } else {
+          // Push existing local pins to cloud
           const localPins = getLocalPins();
           if (localPins.length > 0) {
             localPins.forEach(async (p) => {
@@ -125,14 +170,14 @@ export default function App() {
               try {
                 await setDoc(doc(db, 'users', userId, 'pins', updatedPin.id), updatedPin);
               } catch (err) {
-                handleFirestoreError(err, OperationType.WRITE, `${pinsPath}/${updatedPin.id}`);
+                console.warn('Initial pin sync note:', err);
               }
             });
           }
         }
       },
       (error) => {
-        handleFirestoreError(error, OperationType.GET, pinsPath);
+        console.warn('Pins snapshot notice:', error);
       }
     );
 
@@ -148,72 +193,175 @@ export default function App() {
         if (cloudCats.length > 0) {
           setCategories(cloudCats);
           saveLocalCategories(cloudCats);
-        } else {
-          DEFAULT_CATEGORIES.forEach(async (cat) => {
-            const userCat = { ...cat, userId };
-            try {
-              await setDoc(doc(db, 'users', userId, 'categories', userCat.id), userCat);
-            } catch (err) {
-              handleFirestoreError(err, OperationType.WRITE, `${categoriesPath}/${userCat.id}`);
-            }
-          });
         }
       },
       (error) => {
-        handleFirestoreError(error, OperationType.GET, categoriesPath);
+        console.warn('Categories snapshot notice:', error);
+      }
+    );
+
+    // 3. Sync Maps metadata from Firestore
+    const unsubMaps = onSnapshot(
+      collection(db, 'users', userId, 'maps'),
+      (snapshot) => {
+        const cloudMaps: Omit<MapData, 'url'>[] = [];
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data();
+          cloudMaps.push({
+            id: data.id,
+            name: data.name,
+            width: data.width,
+            height: data.height,
+            isCustom: true,
+            userId: data.userId,
+            createdAt: data.createdAt,
+            chunkCount: data.chunkCount,
+            totalSize: data.totalSize,
+          });
+        });
+
+        if (cloudMaps.length > 0) {
+          setMapsList(cloudMaps);
+          saveLocalMapsList(cloudMaps);
+        }
+      },
+      (error) => {
+        console.warn('Maps snapshot notice:', error);
       }
     );
 
     return () => {
       unsubPins();
       unsubCats();
+      unsubMaps();
     };
   }, [user]);
 
-  // Handle Google Sign In
-  const handleSignIn = async () => {
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (err) {
-      console.error('Google Sign In failed:', err);
-    }
+  // Account login handler (from modal)
+  const handleAccountLogin = (account: UserAccount) => {
+    setUser(account);
+    saveLocalAccount(account);
   };
 
-  // Handle Sign Out
+  // Sign out handler
   const handleSignOut = async () => {
     try {
-      await signOut(auth);
-      setPins(getLocalPins());
-      setCategories(getLocalCategories());
+      if (user?.provider === 'google') {
+        await signOut(auth);
+      }
     } catch (err) {
-      console.error('Sign Out failed:', err);
+      console.warn('Sign out notice:', err);
     }
+    setUser(null);
+    saveLocalAccount(null);
   };
 
-  // Update Map and store in IndexedDB without compression
-  const handleUpdateMap = async (newMap: MapData) => {
-    setActiveMap(newMap);
-    saveSavedMapMeta({
-      id: newMap.id,
-      name: newMap.name,
-      width: newMap.width,
-      height: newMap.height,
-      isCustom: newMap.isCustom,
+  // Switch between maps
+  const handleSelectMap = async (mapId: string) => {
+    const meta = mapsList.find((m) => m.id === mapId);
+    if (!meta) return;
+
+    saveActiveMapId(mapId);
+
+    // Check IndexedDB first for instant 0-latency display
+    let dataUrl = await getCustomMapImage(mapId);
+    if (!dataUrl && user) {
+      // Fetch chunks from Firestore
+      dataUrl = await fetchMapImageFromFirestore(user.uid, mapId);
+    }
+
+    setActiveMap({
+      ...meta,
+      url: dataUrl || '',
     });
-    if (newMap.url) {
-      await saveCustomMapImage(newMap.id, newMap.url);
+  };
+
+  // Upload a new map (Uncompressed native resolution) and save to account & database
+  const handleUploadNewMap = async (file: File, name: string) => {
+    setIsUploadingMap(true);
+    const reader = new FileReader();
+
+    reader.onload = async (event) => {
+      const dataUrl = event.target?.result as string;
+      const img = new Image();
+
+      img.onload = async () => {
+        const mapId = `map-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+        const userId = user ? user.uid : 'local-user';
+
+        const newMapMeta: Omit<MapData, 'url'> = {
+          id: mapId,
+          name: name.trim() || file.name.replace(/\.[^/.]+$/, ''),
+          width: img.naturalWidth || 2048,
+          height: img.naturalHeight || 2048,
+          isCustom: true,
+          userId,
+          createdAt: new Date().toISOString(),
+        };
+
+        const newMapFull: MapData = {
+          ...newMapMeta,
+          url: dataUrl,
+        };
+
+        // 1. Cache uncompressed image in IndexedDB
+        await saveCustomMapImage(mapId, dataUrl);
+
+        // 2. Update local maps list
+        const updatedList = [newMapMeta, ...mapsList.filter((m) => m.id !== mapId)];
+        setMapsList(updatedList);
+        saveLocalMapsList(updatedList);
+
+        // 3. Switch active map immediately
+        setActiveMap(newMapFull);
+        saveActiveMapId(mapId);
+
+        // 4. If logged in, save metadata & uncompressed chunks to Firestore
+        if (user) {
+          try {
+            await uploadMapToFirestore(user.uid, newMapFull);
+          } catch (err) {
+            console.error('Failed to sync map to Firestore:', err);
+          }
+        }
+
+        setIsUploadingMap(false);
+        setIsMapManagerOpen(false);
+      };
+
+      img.src = dataUrl;
+    };
+
+    reader.readAsDataURL(file);
+  };
+
+  // Delete Map
+  const handleDeleteMap = async (mapId: string) => {
+    const updatedList = mapsList.filter((m) => m.id !== mapId);
+    setMapsList(updatedList);
+    saveLocalMapsList(updatedList);
+
+    await deleteCustomMapImage(mapId);
+
+    if (user) {
+      await deleteMapFromFirestore(user.uid, mapId).catch(console.error);
+    }
+
+    if (activeMap.id === mapId && updatedList.length > 0) {
+      handleSelectMap(updatedList[0].id);
     }
   };
 
-  // Add or Edit Pin
+  // Add or Edit Pin (saved pins persist across map switches!)
   const handleSavePin = async (
     pinData: Omit<Pin, 'id' | 'createdAt' | 'userId'>,
     pinId?: string
   ) => {
-    const userId = user ? user.uid : 'local-guest';
+    const userId = user ? user.uid : 'local-user';
     const now = new Date().toISOString();
 
     if (pinId) {
+      // Edit pin
       const updatedPins = pins.map((p) => {
         if (p.id === pinId) {
           return {
@@ -239,9 +387,11 @@ export default function App() {
         }
       }
     } else {
+      // Create new pin
       const newPin: Pin = {
         ...pinData,
         id: `pin-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+        mapId: activeMap.id,
         userId,
         createdAt: now,
       };
@@ -282,11 +432,11 @@ export default function App() {
     }
   };
 
-  // Add Category
+  // Create Category (User-defined only)
   const handleSaveCategory = async (
     catData: Omit<Category, 'id' | 'createdAt' | 'userId'>
-  ) => {
-    const userId = user ? user.uid : 'local-guest';
+  ): Promise<Category> => {
+    const userId = user ? user.uid : 'local-user';
     const newCategory: Category = {
       ...catData,
       id: `cat-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -306,6 +456,7 @@ export default function App() {
         handleFirestoreError(err, OperationType.WRITE, path);
       }
     }
+    return newCategory;
   };
 
   // Delete Category
@@ -353,8 +504,11 @@ export default function App() {
     }
   };
 
-  // Locate Pin on Map from Dashboard or Solver
+  // Locate Pin on Map from Dashboard or Solver (switches to pin's map if different)
   const handleLocatePinOnMap = (pin: Pin) => {
+    if (pin.mapId && pin.mapId !== activeMap.id) {
+      handleSelectMap(pin.mapId);
+    }
     setSelectedPinId(pin.id);
     setActiveTab('map');
   };
@@ -372,9 +526,12 @@ export default function App() {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         user={user}
-        onSignIn={handleSignIn}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
         onSignOut={handleSignOut}
         pinCount={pins.length}
+        activeMap={activeMap}
+        mapsCount={mapsList.length}
+        onOpenMapManager={() => setIsMapManagerOpen(true)}
       />
 
       {/* Main Tab View */}
@@ -384,7 +541,7 @@ export default function App() {
             pins={pins}
             categories={categories}
             activeMap={activeMap}
-            onUpdateMap={handleUpdateMap}
+            onUploadMapFile={handleUploadNewMap}
             onOpenPinModal={(coords) => {
               setPendingCoords(coords);
               setEditingPin(null);
@@ -398,6 +555,7 @@ export default function App() {
             onSolveForPin={handleSolveForPin}
             selectedPinId={selectedPinId}
             onSelectPin={(pin) => setSelectedPinId(pin ? pin.id : null)}
+            onOpenMapManager={() => setIsMapManagerOpen(true)}
           />
         )}
 
@@ -406,6 +564,8 @@ export default function App() {
             pins={pins}
             categories={categories}
             activeMap={activeMap}
+            mapsList={mapsList}
+            onSelectMap={handleSelectMap}
             onLocatePinOnMap={handleLocatePinOnMap}
             onEditPin={(pin) => {
               setEditingPin(pin);
@@ -441,6 +601,9 @@ export default function App() {
         initialCoords={pendingCoords || undefined}
         categories={categories}
         onOpenCategoryModal={() => setIsCategoryModalOpen(true)}
+        onQuickCreateCategory={(name, color, icon) =>
+          handleSaveCategory({ name, color, icon })
+        }
         editingPin={editingPin}
         mapId={activeMap.id}
       />
@@ -450,6 +613,28 @@ export default function App() {
         isOpen={isCategoryModalOpen}
         onClose={() => setIsCategoryModalOpen(false)}
         onSave={handleSaveCategory}
+      />
+
+      {/* Map Switcher & Manager Modal */}
+      <MapManagerModal
+        isOpen={isMapManagerOpen}
+        onClose={() => setIsMapManagerOpen(false)}
+        maps={mapsList}
+        activeMapId={activeMap.id}
+        onSelectMap={handleSelectMap}
+        onUploadNewMap={handleUploadNewMap}
+        onDeleteMap={handleDeleteMap}
+        pins={pins}
+        isUploadingMap={isUploadingMap}
+      />
+
+      {/* Authentication Modal */}
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        currentUser={user}
+        onAccountLogin={handleAccountLogin}
+        onSignOut={handleSignOut}
       />
     </div>
   );

@@ -108,6 +108,76 @@
         }
       },
       "required": ["id", "name", "color", "icon", "userId"]
+    },
+    "MapDoc": {
+      "title": "MapDoc",
+      "description": "A saved map document with metadata.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique map ID.",
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "description": "Map name.",
+          "maxLength": 100
+        },
+        "width": {
+          "type": "number",
+          "description": "Natural pixel width."
+        },
+        "height": {
+          "type": "number",
+          "description": "Natural pixel height."
+        },
+        "chunkCount": {
+          "type": "number",
+          "description": "Number of image data chunks stored in subcollection."
+        },
+        "totalSize": {
+          "type": "number",
+          "description": "Total image size in bytes."
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user ID.",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when the map was uploaded."
+        }
+      },
+      "required": ["id", "name", "width", "height", "userId"]
+    },
+    "MapChunk": {
+      "title": "MapChunk",
+      "description": "Chunked image data fragment for a map.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Chunk identifier.",
+          "maxLength": 64
+        },
+        "chunkIndex": {
+          "type": "number",
+          "description": "Sequential chunk index starting from 0."
+        },
+        "data": {
+          "type": "string",
+          "description": "Base64 data segment.",
+          "maxLength": 800000
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user ID.",
+          "maxLength": 128
+        }
+      },
+      "required": ["id", "chunkIndex", "data", "userId"]
     }
   },
   "firestore": {
@@ -118,6 +188,14 @@
     "/users/{userId}/categories/{categoryId}": {
       "schema": "Category",
       "description": "User defined categories for grouping pins."
+    },
+    "/users/{userId}/maps/{mapId}": {
+      "schema": "MapDoc",
+      "description": "User uploaded map metadata."
+    },
+    "/users/{userId}/maps/{mapId}/chunks/{chunkId}": {
+      "schema": "MapChunk",
+      "description": "Map image data chunks."
     }
   }
 }
