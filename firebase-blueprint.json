@@ -1,0 +1,123 @@
+{
+  "entities": {
+    "Pin": {
+      "title": "Pin",
+      "description": "A landmark coordinate pin placed on a map canvas.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the pin."
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the landmark pin.",
+          "maxLength": 100
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional notes or details for the landmark.",
+          "maxLength": 500
+        },
+        "xPercent": {
+          "type": "number",
+          "description": "X coordinate as percentage from 0 to 100."
+        },
+        "yPercent": {
+          "type": "number",
+          "description": "Y coordinate as percentage from 0 to 100."
+        },
+        "pixelX": {
+          "type": "number",
+          "description": "Calculated base image X pixel coordinate."
+        },
+        "pixelY": {
+          "type": "number",
+          "description": "Calculated base image Y pixel coordinate."
+        },
+        "categoryId": {
+          "type": "string",
+          "description": "ID of the associated category.",
+          "maxLength": 64
+        },
+        "categoryName": {
+          "type": "string",
+          "description": "Name of the category for quick filtering.",
+          "maxLength": 64
+        },
+        "color": {
+          "type": "string",
+          "description": "Hex or theme color for the pin marker.",
+          "maxLength": 32
+        },
+        "icon": {
+          "type": "string",
+          "description": "Icon key for the pin marker.",
+          "maxLength": 32
+        },
+        "mapId": {
+          "type": "string",
+          "description": "Identifier of the map this pin belongs to.",
+          "maxLength": 64
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user ID for personal dashboard filtering.",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when the pin was created."
+        }
+      },
+      "required": ["id", "name", "xPercent", "yPercent", "categoryId", "userId"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Custom user-defined landmark category.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique category identifier.",
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "description": "Category name label.",
+          "maxLength": 64
+        },
+        "color": {
+          "type": "string",
+          "description": "Associated category hex color.",
+          "maxLength": 32
+        },
+        "icon": {
+          "type": "string",
+          "description": "Associated icon identifier.",
+          "maxLength": 32
+        },
+        "userId": {
+          "type": "string",
+          "description": "Owner user ID.",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when the category was created."
+        }
+      },
+      "required": ["id", "name", "color", "icon", "userId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/pins/{pinId}": {
+      "schema": "Pin",
+      "description": "User specific landmark pins plotted on maps."
+    },
+    "/users/{userId}/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "User defined categories for grouping pins."
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "MQS Map Plotter",
+  "description": "Interactive map plotter and coordinate dashboard for exploring maps, dropping customized landmark pins, and managing coordinates.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

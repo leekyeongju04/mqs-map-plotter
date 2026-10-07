@@ -1,0 +1,73 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidPin(data, userId) {
+      return data.keys().hasAll(['id', 'name', 'xPercent', 'yPercent', 'categoryId', 'userId']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+        data.xPercent is number && data.xPercent >= 0 && data.xPercent <= 100 &&
+        data.yPercent is number && data.yPercent >= 0 && data.yPercent <= 100 &&
+        data.categoryId is string && data.categoryId.size() <= 64 &&
+        data.userId == userId &&
+        (!('description' in data) || (data.description is string && data.description.size() <= 500)) &&
+        (!('color' in data) || (data.color is string && data.color.size() <= 32)) &&
+        (!('icon' in data) || (data.icon is string && data.icon.size() <= 32)) &&
+        (!('categoryName' in data) || (data.categoryName is string && data.categoryName.size() <= 64)) &&
+        (!('mapId' in data) || (data.mapId is string && data.mapId.size() <= 64)) &&
+        (!('pixelX' in data) || data.pixelX is number) &&
+        (!('pixelY' in data) || data.pixelY is number);
+    }
+
+    function isValidCategory(data, userId) {
+      return data.keys().hasAll(['id', 'name', 'color', 'icon', 'userId']) &&
+        data.id is string && data.id.size() <= 64 &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 64 &&
+        data.color is string && data.color.size() <= 32 &&
+        data.icon is string && data.icon.size() <= 32 &&
+        data.userId == userId;
+    }
+
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+
+      match /pins/{pinId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(pinId) && isValidPin(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(pinId) && isValidPin(incoming(), userId) && incoming().userId == existing().userId;
+        allow delete: if isOwner(userId) && isValidId(pinId);
+      }
+
+      match /categories/{categoryId} {
+        allow get, list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(categoryId) && isValidCategory(incoming(), userId);
+        allow update: if isOwner(userId) && isValidId(categoryId) && isValidCategory(incoming(), userId) && incoming().userId == existing().userId;
+        allow delete: if isOwner(userId) && isValidId(categoryId);
+      }
+    }
+  }
+}
