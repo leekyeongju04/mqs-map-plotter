@@ -13,6 +13,8 @@ import {
   Layers,
   Crosshair,
   Map as MapIcon,
+  ArrowUpAZ,
+  ArrowDownZA,
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -70,7 +72,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
     })
     .sort((a, b) => {
       if (sortField === 'name') {
-        return sortAsc ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
+        const cmp = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+        return sortAsc ? cmp : -cmp;
       }
       if (sortField === 'x') {
         return sortAsc ? a.pixelX - b.pixelX : b.pixelX - a.pixelX;
@@ -279,14 +282,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           <select
             value={sortField}
-            onChange={(e) => setSortField(e.target.value as any)}
-            className="px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+            onChange={(e) => {
+              const val = e.target.value as any;
+              setSortField(val);
+              if (val === 'name') setSortAsc(true);
+            }}
+            className="px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium text-slate-700 cursor-pointer shadow-2xs"
           >
             <option value="date">Sort: Date Created</option>
-            <option value="name">Sort: Name (A-Z)</option>
+            <option value="name">Sort: Name (A-Z / 0-9)</option>
             <option value="x">Sort: X Coordinate</option>
             <option value="y">Sort: Y Coordinate</option>
           </select>
+
+          <button
+            type="button"
+            onClick={() => setSortAsc(!sortAsc)}
+            className="p-2 text-xs bg-white border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer flex items-center justify-center shadow-2xs"
+            title={sortAsc ? 'Ascending (A-Z, 0-9) - click to reverse' : 'Descending (Z-A, 9-0) - click to reverse'}
+          >
+            {sortAsc ? <ArrowUpAZ className="w-4 h-4 text-sky-600" /> : <ArrowDownZA className="w-4 h-4 text-sky-600" />}
+          </button>
         </div>
       </div>
 

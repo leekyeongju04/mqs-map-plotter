@@ -180,8 +180,22 @@ export default function App() {
         });
 
         if (cloudPins.length > 0) {
-          setPins(cloudPins);
-          saveLocalPins(cloudPins);
+          const localPins = getLocalPins();
+          const cloudIds = new Set(cloudPins.map((p) => p.id));
+          const unpushed = localPins.filter((p) => !cloudIds.has(p.id));
+          if (unpushed.length > 0) {
+            unpushed.forEach(async (p) => {
+              const updatedPin = { ...p, userId };
+              try {
+                await setDoc(doc(db, 'users', userId, 'pins', updatedPin.id), updatedPin);
+              } catch (err) {
+                console.warn('Syncing unpushed pin:', err);
+              }
+            });
+          }
+          const allPins = [...cloudPins, ...unpushed.map((p) => ({ ...p, userId }))];
+          setPins(allPins);
+          saveLocalPins(allPins);
         } else {
           // Push existing local pins to cloud
           const localPins = getLocalPins();
@@ -212,8 +226,34 @@ export default function App() {
         });
 
         if (cloudCats.length > 0) {
-          setCategories(cloudCats);
-          saveLocalCategories(cloudCats);
+          const localCats = getLocalCategories();
+          const cloudIds = new Set(cloudCats.map((c) => c.id));
+          const unpushed = localCats.filter((c) => !cloudIds.has(c.id));
+          if (unpushed.length > 0) {
+            unpushed.forEach(async (c) => {
+              const updated = { ...c, userId };
+              try {
+                await setDoc(doc(db, 'users', userId, 'categories', updated.id), updated);
+              } catch (err) {
+                console.warn('Syncing unpushed category:', err);
+              }
+            });
+          }
+          const allCats = [...cloudCats, ...unpushed.map((c) => ({ ...c, userId }))];
+          setCategories(allCats);
+          saveLocalCategories(allCats);
+        } else {
+          const localCats = getLocalCategories();
+          if (localCats.length > 0) {
+            localCats.forEach(async (c) => {
+              const updated = { ...c, userId };
+              try {
+                await setDoc(doc(db, 'users', userId, 'categories', updated.id), updated);
+              } catch (err) {
+                console.warn('Initial category sync note:', err);
+              }
+            });
+          }
         }
       },
       (error) => {
@@ -244,6 +284,18 @@ export default function App() {
         if (cloudMaps.length > 0) {
           setMapsList(cloudMaps);
           saveLocalMapsList(cloudMaps);
+        } else {
+          // Push any custom local maps to the cloud
+          const localMaps = getLocalMapsList();
+          for (const m of localMaps) {
+            if (m.isCustom) {
+              getCustomMapImage(m.id).then((imgData) => {
+                if (imgData) {
+                  uploadMapToFirestore(userId, { ...m, url: imgData }).catch(console.warn);
+                }
+              });
+            }
+          }
         }
       },
       (error) => {
@@ -259,9 +311,20 @@ export default function App() {
   }, [user]);
 
   // Account login handler (from modal)
-  const handleAccountLogin = (account: UserAccount) => {
+  const handleAccountLogin = async (account: UserAccount) => {
     setUser(account);
     saveLocalAccount(account);
+
+    // Push existing custom maps to Firestore
+    const localMaps = getLocalMapsList();
+    for (const m of localMaps) {
+      if (m.isCustom) {
+        const imgData = await getCustomMapImage(m.id);
+        if (imgData) {
+          uploadMapToFirestore(account.uid, { ...m, url: imgData }).catch(console.warn);
+        }
+      }
+    }
   };
 
   // Sign out handler
