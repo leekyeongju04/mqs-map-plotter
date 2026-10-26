@@ -111,19 +111,23 @@ export const CategoryModal: React.FC<CategoryModalProps> = ({ isOpen, onClose, o
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-medium text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+              title="Cancel"
+              aria-label="Cancel"
+              className="p-2 text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
             >
-              Cancel
+              <X className="w-4 h-4" />
             </button>
             <button
               type="submit"
-              className="px-5 py-2 text-xs font-medium text-white bg-sky-600 hover:bg-sky-700 rounded-lg shadow-xs transition-colors"
+              title="Create Category"
+              aria-label="Create Category"
+              className="p-2 text-white bg-sky-600 hover:bg-sky-700 rounded-lg shadow-xs transition-colors cursor-pointer"
             >
-              Create Category
+              <Check className="w-4 h-4" />
             </button>
           </div>
         </form>

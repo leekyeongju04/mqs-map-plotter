@@ -14,7 +14,7 @@ import {
   handleFirestoreError,
   OperationType,
 } from './firebase';
-import { Pin, Category, MapData, UserAccount } from './types';
+import { Pin, Category, MapData, UserAccount, PersonBot, CoinLogEntry, BotStatus } from './types';
 import {
   getLocalPins,
   saveLocalPins,
@@ -29,6 +29,9 @@ import {
   deleteCustomMapImage,
   getLocalAccount,
   saveLocalAccount,
+  getLocalPersons,
+  saveLocalPersons,
+  formatPHTime,
 } from './utils/storage';
 import {
   uploadMapToFirestore,
@@ -54,6 +57,7 @@ export default function App() {
   // Pins & Categories state (Categories starts empty per user request)
   const [pins, setPins] = useState<Pin[]>(() => getLocalPins());
   const [categories, setCategories] = useState<Category[]>(() => getLocalCategories());
+  const [persons, setPersons] = useState<PersonBot[]>(() => getLocalPersons());
 
   // Maps List state (stores metadata of all maps)
   const [mapsList, setMapsList] = useState<Omit<MapData, 'url'>[]>(() => {
@@ -303,10 +307,56 @@ export default function App() {
       }
     );
 
+    // 4. Sync Persons & Bot Workers from Firestore
+    const unsubPersons = onSnapshot(
+      collection(db, 'users', userId, 'persons'),
+      (snapshot) => {
+        const cloudPersons: PersonBot[] = [];
+        snapshot.forEach((docSnap) => {
+          cloudPersons.push(docSnap.data() as PersonBot);
+        });
+
+        if (cloudPersons.length > 0) {
+          const localPersons = getLocalPersons();
+          const cloudIds = new Set(cloudPersons.map((p) => p.id));
+          const unpushed = localPersons.filter((p) => !cloudIds.has(p.id));
+          if (unpushed.length > 0) {
+            unpushed.forEach(async (p) => {
+              const updated = { ...p, userId };
+              try {
+                await setDoc(doc(db, 'users', userId, 'persons', updated.id), updated);
+              } catch (err) {
+                console.warn('Syncing unpushed person:', err);
+              }
+            });
+          }
+          const allPersons = [...cloudPersons, ...unpushed.map((p) => ({ ...p, userId }))];
+          setPersons(allPersons);
+          saveLocalPersons(allPersons);
+        } else {
+          const localPersons = getLocalPersons();
+          if (localPersons.length > 0) {
+            localPersons.forEach(async (p) => {
+              const updated = { ...p, userId };
+              try {
+                await setDoc(doc(db, 'users', userId, 'persons', updated.id), updated);
+              } catch (err) {
+                console.warn('Initial person sync note:', err);
+              }
+            });
+          }
+        }
+      },
+      (error) => {
+        console.warn('Persons snapshot notice:', error);
+      }
+    );
+
     return () => {
       unsubPins();
       unsubCats();
       unsubMaps();
+      unsubPersons();
     };
   }, [user]);
 
@@ -603,6 +653,225 @@ export default function App() {
     setActiveTab('solver');
   };
 
+  // --- Persons / Bot Workers Handlers ---
+  const handleAddPerson = async (
+    name: string,
+    assignedPinId?: string,
+    status: BotStatus = 'working',
+    banLiftDate?: string
+  ) => {
+    const assignedPin = pins.find((p) => p.id === assignedPinId);
+    const personId = `person-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    const now = new Date();
+    const initialLogs: CoinLogEntry[] = [];
+
+    if (assignedPinId) {
+      initialLogs.push({
+        id: `log-pin-${Date.now()}`,
+        type: 'pin_change',
+        newPinId: assignedPinId,
+        newPinName: assignedPin?.name || 'Assigned Pin',
+        timestamp: now.toISOString(),
+        phTime: formatPHTime(now),
+        note: `Initial pin assignment: ${assignedPin?.name || 'Assigned Pin'}`,
+      });
+    }
+
+    if (status === 'banned') {
+      initialLogs.push({
+        id: `log-status-${Date.now()}`,
+        type: 'status_change',
+        newStatus: 'banned',
+        banLiftDate: banLiftDate || undefined,
+        timestamp: now.toISOString(),
+        phTime: formatPHTime(now),
+        note: `Initial status set to Banned${banLiftDate ? ` (Ban lifts on: ${banLiftDate})` : ''}`,
+      });
+    }
+
+    const newPerson: PersonBot = {
+      id: personId,
+      name,
+      assignedPinId: assignedPinId || undefined,
+      assignedPinName: assignedPin?.name || undefined,
+      status,
+      banLiftDate: status === 'banned' ? banLiftDate || undefined : undefined,
+      totalCoins: 0,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      userId: user ? user.uid : 'local-user',
+      logs: initialLogs,
+    };
+
+    const updated = [newPerson, ...persons];
+    setPersons(updated);
+    saveLocalPersons(updated);
+
+    if (user) {
+      try {
+        await setDoc(doc(db, 'users', user.uid, 'persons', personId), newPerson);
+      } catch (err) {
+        console.warn('Firestore add person error:', err);
+      }
+    }
+  };
+
+  const handleUpdatePerson = async (
+    personId: string,
+    name: string,
+    newPinId?: string,
+    status: BotStatus = 'working',
+    banLiftDate?: string
+  ) => {
+    const currentPerson = persons.find((p) => p.id === personId);
+    if (!currentPerson) return;
+
+    const oldPinId = currentPerson.assignedPinId;
+    const oldPinName = currentPerson.assignedPinName;
+    const newPin = pins.find((p) => p.id === newPinId);
+    const newPinName = newPin?.name;
+    const oldStatus = currentPerson.status || 'working';
+    const oldBanDate = currentPerson.banLiftDate;
+    const now = new Date();
+
+    let updatedLogs = [...currentPerson.logs];
+
+    // Status change logging
+    if (status !== oldStatus || (status === 'banned' && banLiftDate !== oldBanDate)) {
+      const statusLog: CoinLogEntry = {
+        id: `log-status-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        type: 'status_change',
+        oldStatus,
+        newStatus: status,
+        banLiftDate: status === 'banned' ? banLiftDate || undefined : undefined,
+        timestamp: now.toISOString(),
+        phTime: formatPHTime(now),
+        note:
+          status === 'banned'
+            ? `Status changed from Working to Banned${banLiftDate ? ` (Ban lifts on: ${banLiftDate})` : ''}`
+            : `Status changed from Banned to Working (Ban lifted)`,
+      };
+      updatedLogs = [statusLog, ...updatedLogs];
+    }
+
+    // Pin change logging
+    if (newPinId !== oldPinId) {
+      const pinChangeLog: CoinLogEntry = {
+        id: `log-pin-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        type: 'pin_change',
+        oldPinId: oldPinId || undefined,
+        oldPinName: oldPinName || 'None',
+        newPinId: newPinId || undefined,
+        newPinName: newPinName || 'None',
+        timestamp: now.toISOString(),
+        phTime: formatPHTime(now),
+        note: `Pin changed from "${oldPinName || 'None'}" to "${newPinName || 'None'}"`,
+      };
+      updatedLogs = [pinChangeLog, ...updatedLogs];
+    }
+
+    const updatedPerson: PersonBot = {
+      ...currentPerson,
+      name,
+      assignedPinId: newPinId || undefined,
+      assignedPinName: newPinName || undefined,
+      status,
+      banLiftDate: status === 'banned' ? banLiftDate || undefined : undefined,
+      updatedAt: now.toISOString(),
+      logs: updatedLogs,
+    };
+
+    const updatedList = persons.map((p) => (p.id === personId ? updatedPerson : p));
+    setPersons(updatedList);
+    saveLocalPersons(updatedList);
+
+    if (user) {
+      try {
+        await setDoc(doc(db, 'users', user.uid, 'persons', personId), updatedPerson);
+      } catch (err) {
+        console.warn('Firestore update person error:', err);
+      }
+    }
+  };
+
+  const handleDeletePerson = async (personId: string) => {
+    const updated = persons.filter((p) => p.id !== personId);
+    setPersons(updated);
+    saveLocalPersons(updated);
+
+    if (user) {
+      try {
+        await deleteDoc(doc(db, 'users', user.uid, 'persons', personId));
+      } catch (err) {
+        console.warn('Firestore delete person error:', err);
+      }
+    }
+  };
+
+  const handleLogCoins = async (personId: string, amount: number) => {
+    const currentPerson = persons.find((p) => p.id === personId);
+    if (!currentPerson || amount <= 0) return;
+
+    const now = new Date();
+    const assignedPin = pins.find((p) => p.id === currentPerson.assignedPinId);
+
+    const coinLog: CoinLogEntry = {
+      id: `log-coins-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      type: 'coins',
+      amount,
+      pinId: currentPerson.assignedPinId,
+      pinName: assignedPin?.name || currentPerson.assignedPinName || 'Unassigned',
+      timestamp: now.toISOString(),
+      phTime: formatPHTime(now),
+    };
+
+    const updatedPerson: PersonBot = {
+      ...currentPerson,
+      totalCoins: (currentPerson.totalCoins || 0) + amount,
+      updatedAt: now.toISOString(),
+      logs: [coinLog, ...currentPerson.logs],
+    };
+
+    const updatedList = persons.map((p) => (p.id === personId ? updatedPerson : p));
+    setPersons(updatedList);
+    saveLocalPersons(updatedList);
+
+    if (user) {
+      try {
+        await setDoc(doc(db, 'users', user.uid, 'persons', personId), updatedPerson);
+      } catch (err) {
+        console.warn('Firestore log coins error:', err);
+      }
+    }
+  };
+
+  const handleDeleteLogEntry = async (personId: string, logId: string) => {
+    const currentPerson = persons.find((p) => p.id === personId);
+    if (!currentPerson) return;
+
+    const targetLog = currentPerson.logs.find((l) => l.id === logId);
+    const coinAdjustment = targetLog?.type === 'coins' ? targetLog.amount || 0 : 0;
+
+    const updatedPerson: PersonBot = {
+      ...currentPerson,
+      totalCoins: Math.max(0, currentPerson.totalCoins - coinAdjustment),
+      logs: currentPerson.logs.filter((l) => l.id !== logId),
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updatedList = persons.map((p) => (p.id === personId ? updatedPerson : p));
+    setPersons(updatedList);
+    saveLocalPersons(updatedList);
+
+    if (user) {
+      try {
+        await setDoc(doc(db, 'users', user.uid, 'persons', personId), updatedPerson);
+      } catch (err) {
+        console.warn('Firestore delete log error:', err);
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
       {/* Top Header */}
@@ -649,6 +918,7 @@ export default function App() {
             categories={categories}
             activeMap={activeMap}
             mapsList={mapsList}
+            persons={persons}
             onSelectMap={handleSelectMap}
             onLocatePinOnMap={handleLocatePinOnMap}
             onEditPin={(pin) => {
@@ -660,6 +930,11 @@ export default function App() {
             onDeleteCategory={handleDeleteCategory}
             onImportData={handleImportData}
             onSwitchToMap={() => setActiveTab('map')}
+            onAddPerson={handleAddPerson}
+            onUpdatePerson={handleUpdatePerson}
+            onDeletePerson={handleDeletePerson}
+            onLogCoins={handleLogCoins}
+            onDeleteLogEntry={handleDeleteLogEntry}
           />
         )}
 

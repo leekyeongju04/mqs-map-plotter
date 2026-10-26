@@ -89,6 +89,10 @@ service cloud.firestore {
           allow delete: if isOwner(userId) && isValidId(chunkId);
         }
       }
+
+      match /persons/{personId} {
+        allow read, write: if isOwner(userId);
+      }
     }
   }
 }

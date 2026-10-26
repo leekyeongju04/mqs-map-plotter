@@ -50,3 +50,46 @@ export interface UserAccount {
   isAnonymous?: boolean;
   provider: 'google' | 'account';
 }
+
+export type BotStatus = 'working' | 'banned';
+
+export interface CoinLogEntry {
+  id: string;
+  type: 'coins' | 'pin_change' | 'status_change';
+  amount?: number;
+  pinId?: string;
+  pinName?: string;
+  oldPinId?: string;
+  oldPinName?: string;
+  newPinId?: string;
+  newPinName?: string;
+  oldStatus?: BotStatus;
+  newStatus?: BotStatus;
+  banLiftDate?: string;
+  timestamp: string;
+  phTime: string;
+  note?: string;
+}
+
+export interface PersonBot {
+  id: string;
+  name: string;
+  assignedPinId?: string;
+  assignedPinName?: string;
+  status?: BotStatus;
+  banLiftDate?: string;
+  totalCoins: number;
+  createdAt: string;
+  updatedAt: string;
+  userId?: string;
+  logs: CoinLogEntry[];
+}
+
+export interface PinDailyStats {
+  pinId: string;
+  totalCoins: number;
+  coinsPerDay: number;
+  todayCoins: number;
+  logCount: number;
+  lastLoggedAt?: string;
+}
