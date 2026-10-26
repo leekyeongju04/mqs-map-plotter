@@ -36,13 +36,20 @@ interface DashboardProps {
   onDeleteCategory: (categoryId: string) => void;
   onImportData: (data: { pins: Pin[]; categories?: Category[] }) => void;
   onSwitchToMap: () => void;
-  onAddPerson: (name: string, assignedPinId?: string, status?: BotStatus, banLiftDate?: string) => void;
+  onAddPerson: (
+    name: string,
+    assignedPinId?: string,
+    status?: BotStatus,
+    banLiftDate?: string,
+    botNumber?: string
+  ) => void;
   onUpdatePerson: (
     personId: string,
     name: string,
     newPinId?: string,
     status?: BotStatus,
-    banLiftDate?: string
+    banLiftDate?: string,
+    botNumber?: string
   ) => void;
   onDeletePerson: (personId: string) => void;
   onLogCoins: (personId: string, amount: number) => void;

@@ -74,6 +74,7 @@ export interface CoinLogEntry {
 export interface PersonBot {
   id: string;
   name: string;
+  botNumber?: string;
   assignedPinId?: string;
   assignedPinName?: string;
   status?: BotStatus;

@@ -658,7 +658,8 @@ export default function App() {
     name: string,
     assignedPinId?: string,
     status: BotStatus = 'working',
-    banLiftDate?: string
+    banLiftDate?: string,
+    botNumber?: string
   ) => {
     const assignedPin = pins.find((p) => p.id === assignedPinId);
     const personId = `person-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
@@ -692,6 +693,7 @@ export default function App() {
     const newPerson: PersonBot = {
       id: personId,
       name,
+      botNumber: botNumber?.trim() || undefined,
       assignedPinId: assignedPinId || undefined,
       assignedPinName: assignedPin?.name || undefined,
       status,
@@ -721,7 +723,8 @@ export default function App() {
     name: string,
     newPinId?: string,
     status: BotStatus = 'working',
-    banLiftDate?: string
+    banLiftDate?: string,
+    botNumber?: string
   ) => {
     const currentPerson = persons.find((p) => p.id === personId);
     if (!currentPerson) return;
@@ -773,6 +776,7 @@ export default function App() {
     const updatedPerson: PersonBot = {
       ...currentPerson,
       name,
+      botNumber: botNumber?.trim() || undefined,
       assignedPinId: newPinId || undefined,
       assignedPinName: newPinName || undefined,
       status,
