@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { PersonBot, Pin, CoinLogEntry, BotStatus } from '../types';
 import { formatPHTime } from '../utils/storage';
 import {
@@ -20,6 +20,9 @@ import {
   Ban,
   CheckCircle2,
   ShieldAlert,
+  ImagePlus,
+  Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface BotsTabProps {
@@ -74,6 +77,82 @@ export const BotsTab: React.FC<BotsTabProps> = ({
 
   const [statusFilter, setStatusFilter] = useState<'all' | 'working' | 'banned'>('all');
   const [historyPerson, setHistoryPerson] = useState<PersonBot | null>(null);
+
+  // Confirmation prompts state
+  const [personToDelete, setPersonToDelete] = useState<PersonBot | null>(null);
+  const [logToDelete, setLogToDelete] = useState<{ person: PersonBot; log: CoinLogEntry } | null>(null);
+
+  // OCR state for extracting gold numbers from pasted images
+  const [ocrLoading, setOcrLoading] = useState<Record<string, boolean>>({});
+  const [ocrMessage, setOcrMessage] = useState<Record<string, string>>({});
+  const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  const handleProcessImageForOCR = async (personId: string, file: File) => {
+    if (!file || !file.type.startsWith('image/')) return;
+    setOcrLoading((prev) => ({ ...prev, [personId]: true }));
+    setOcrMessage((prev) => ({ ...prev, [personId]: 'Scanning image for gold...' }));
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const dataUrl = e.target?.result as string;
+      try {
+        const res = await fetch('/api/ocr-gold', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: dataUrl }),
+        });
+        const data = await res.json();
+        if (data.success && typeof data.number === 'number' && data.number > 0) {
+          setCoinInputs((prev) => ({ ...prev, [personId]: String(data.number) }));
+          setOcrMessage((prev) => ({ ...prev, [personId]: `Extracted: ${data.number.toLocaleString()} gold` }));
+          setTimeout(() => {
+            setOcrMessage((prev) => {
+              const copy = { ...prev };
+              delete copy[personId];
+              return copy;
+            });
+          }, 3500);
+        } else {
+          setOcrMessage((prev) => ({ ...prev, [personId]: 'Could not detect number' }));
+          setTimeout(() => {
+            setOcrMessage((prev) => {
+              const copy = { ...prev };
+              delete copy[personId];
+              return copy;
+            });
+          }, 3500);
+        }
+      } catch (err) {
+        console.error('OCR Error:', err);
+        setOcrMessage((prev) => ({ ...prev, [personId]: 'OCR request failed' }));
+        setTimeout(() => {
+          setOcrMessage((prev) => {
+            const copy = { ...prev };
+            delete copy[personId];
+            return copy;
+          });
+        }, 3000);
+      } finally {
+        setOcrLoading((prev) => ({ ...prev, [personId]: false }));
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleCoinInputPaste = (personId: string, e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].type.indexOf('image') !== -1) {
+        const file = items[i].getAsFile();
+        if (file) {
+          e.preventDefault();
+          handleProcessImageForOCR(personId, file);
+          return;
+        }
+      }
+    }
+  };
 
   // --- KPI & Analytics Calculations ---
   // 1. Top Performing Person
@@ -392,17 +471,12 @@ export const BotsTab: React.FC<BotsTabProps> = ({
                         : 'bg-sky-50 border-sky-100 text-sky-700'
                     }`}
                   >
-                    {person.botNumber ? `#${person.botNumber}` : person.name.charAt(0).toUpperCase()}
+                    {person.botNumber ? person.botNumber : person.name.charAt(0).toUpperCase()}
                   </div>
 
-                  {/* Column 1: Bot Number & Name + Pin (fixed width for unified alignment) */}
+                  {/* Column 1: Bot Name + Pin (fixed width for unified alignment) */}
                   <div className="w-36 sm:w-44 md:w-52 shrink-0 min-w-0">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      {person.botNumber && (
-                        <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-mono text-[10px] font-bold border border-slate-200/80 shrink-0">
-                          #{person.botNumber}
-                        </span>
-                      )}
+                    <div className="flex items-center min-w-0">
                       <span className="font-semibold text-sm text-slate-900 truncate" title={person.name}>
                         {person.name}
                       </span>
@@ -454,38 +528,77 @@ export const BotsTab: React.FC<BotsTabProps> = ({
                 </div>
 
                 {/* Exact Sequence of Action Controls:
-                    1. Field that logs amount of coins
+                    1. Field that logs amount of coins (supports pasting image OCR!)
                     2. Quick Status toggle (Working / Banned)
                     3. History button right next to field
                     4. Edit button
-                    5. Delete button
+                    5. Delete button with confirmation prompt
                     (with icon only instead of button labels) */}
                 <div className="flex items-center gap-1.5 shrink-0 self-end md:self-auto">
-                  {/* 1. Field to log coins accumulated */}
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      min="1"
-                      placeholder="+ Coins..."
-                      value={coinInputs[person.id] || ''}
-                      onChange={(e) => handleCoinInputChange(person.id, e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          handleCoinSubmit(person.id);
-                        }
-                      }}
-                      className="w-24 sm:w-28 px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleCoinSubmit(person.id)}
-                      title="Log Coins"
-                      aria-label="Log Coins"
-                      className="p-1.5 sm:p-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg shadow-xs transition-colors cursor-pointer flex items-center justify-center shrink-0"
-                    >
-                      <Plus className="w-4 h-4 stroke-[2.5]" />
-                    </button>
+                  {/* 1. Field to log coins accumulated with OCR image paste/select support */}
+                  <div className="flex flex-col gap-0.5">
+                    <div className="flex items-center gap-1">
+                      <div className="relative flex items-center">
+                        <input
+                          type="number"
+                          min="1"
+                          placeholder="+ Coins / paste image..."
+                          value={coinInputs[person.id] || ''}
+                          onChange={(e) => handleCoinInputChange(person.id, e.target.value)}
+                          onPaste={(e) => handleCoinInputPaste(person.id, e)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleCoinSubmit(person.id);
+                            }
+                          }}
+                          className="w-28 sm:w-36 px-2.5 py-1.5 pr-7 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-500 font-mono"
+                        />
+                        {/* Hidden file input for OCR image picker */}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          ref={(el) => {
+                            fileInputRefs.current[person.id] = el;
+                          }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleProcessImageForOCR(person.id, file);
+                            e.target.value = '';
+                          }}
+                        />
+                        {/* OCR Image Button (icon only) */}
+                        <button
+                          type="button"
+                          onClick={() => fileInputRefs.current[person.id]?.click()}
+                          title="Paste or select image of gold to extract number (OCR)"
+                          aria-label="Paste or select image of gold to extract number"
+                          className="absolute right-1.5 p-0.5 text-slate-400 hover:text-amber-600 transition-colors cursor-pointer"
+                        >
+                          {ocrLoading[person.id] ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-500" />
+                          ) : (
+                            <ImagePlus className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleCoinSubmit(person.id)}
+                        title="Log Coins"
+                        aria-label="Log Coins"
+                        className="p-1.5 sm:p-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg shadow-xs transition-colors cursor-pointer flex items-center justify-center shrink-0"
+                      >
+                        <Plus className="w-4 h-4 stroke-[2.5]" />
+                      </button>
+                    </div>
+                    {ocrMessage[person.id] && (
+                      <span className="text-[10px] text-amber-700 font-medium font-mono">
+                        {ocrMessage[person.id]}
+                      </span>
+                    )}
                   </div>
 
                   {/* 2. Quick Status toggle button (Icon only) */}
@@ -529,10 +642,10 @@ export const BotsTab: React.FC<BotsTabProps> = ({
                     <Edit2 className="w-4 h-4" />
                   </button>
 
-                  {/* 5. Delete button (Icon only) */}
+                  {/* 5. Delete button (Icon only with confirmation prompt) */}
                   <button
                     type="button"
-                    onClick={() => onDeletePerson(person.id)}
+                    onClick={() => setPersonToDelete(person)}
                     title="Delete Person"
                     aria-label="Delete Person"
                     className="p-1.5 sm:p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 border border-slate-200/80 rounded-lg transition-colors cursor-pointer flex items-center justify-center shrink-0"
@@ -986,10 +1099,10 @@ export const BotsTab: React.FC<BotsTabProps> = ({
                         </div>
                       </div>
 
-                      {/* Delete Log Entry Button (Icon Only) */}
+                      {/* Delete Log Entry Button (Icon Only with confirmation) */}
                       <button
                         type="button"
-                        onClick={() => onDeleteLogEntry(activeHistoryPerson.id, log.id)}
+                        onClick={() => setLogToDelete({ person: activeHistoryPerson, log })}
                         title="Delete log record"
                         aria-label="Delete log record"
                         className="p-1 text-slate-300 hover:text-red-500 rounded hover:bg-red-50 transition-colors cursor-pointer shrink-0 mt-0.5"
@@ -1012,6 +1125,89 @@ export const BotsTab: React.FC<BotsTabProps> = ({
                 className="p-2 text-slate-600 hover:text-slate-900 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- CONFIRMATION MODAL: Delete Person / Bot --- */}
+      {personToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm overflow-hidden p-5 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Delete Person / Bot</h3>
+                <p className="text-xs text-slate-500">This action cannot be undone.</p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-600 mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
+              Are you sure you want to delete <strong>{personToDelete.name}</strong>
+              {personToDelete.botNumber ? ` (Bot ${personToDelete.botNumber})` : ''}? This will permanently remove all their recorded coin logs.
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPersonToDelete(null)}
+                title="Cancel"
+                aria-label="Cancel"
+                className="p-2 text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDeletePerson(personToDelete.id);
+                  setPersonToDelete(null);
+                }}
+                title="Confirm Delete"
+                aria-label="Confirm Delete"
+                className="p-2 text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-xs cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- CONFIRMATION MODAL: Delete Log Entry --- */}
+      {logToDelete && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-xs p-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-2 text-red-600 mb-2">
+              <AlertTriangle className="w-4 h-4" />
+              <h4 className="text-xs font-bold text-slate-900">Delete Log Record?</h4>
+            </div>
+            <p className="text-[11px] text-slate-600 mb-3 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+              Are you sure you want to delete this log entry
+              {logToDelete.log.amount ? ` (+${logToDelete.log.amount.toLocaleString()} coins)` : ''}?
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setLogToDelete(null)}
+                title="Cancel"
+                aria-label="Cancel"
+                className="p-1.5 text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDeleteLogEntry(logToDelete.person.id, logToDelete.log.id);
+                  setLogToDelete(null);
+                }}
+                title="Confirm Delete"
+                aria-label="Confirm Delete"
+                className="p-1.5 text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-xs cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>

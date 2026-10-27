@@ -7,12 +7,32 @@ import {
   getRedirectResult,
   signOut,
 } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { initializeFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const db = initializeFirestore(app, {
+  ignoreUndefinedProperties: true,
+}, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
+
+// Helper to remove any undefined fields before sending to Firestore
+export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): T {
+  if (!obj || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) {
+    return obj.map((item) => sanitizeForFirestore(item)) as unknown as T;
+  }
+  const clean: any = {};
+  for (const [key, val] of Object.entries(obj)) {
+    if (val === undefined) continue;
+    if (val !== null && typeof val === 'object' && !(val instanceof Date)) {
+      clean[key] = sanitizeForFirestore(val);
+    } else {
+      clean[key] = val;
+    }
+  }
+  return clean;
+}
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import {
   collection,
@@ -13,6 +13,7 @@ import {
   signOut,
   handleFirestoreError,
   OperationType,
+  sanitizeForFirestore,
 } from './firebase';
 import { Pin, Category, MapData, UserAccount, PersonBot, CoinLogEntry, BotStatus } from './types';
 import {
@@ -166,13 +167,13 @@ export default function App() {
   }, [user, mapsList]);
 
   // Sync with Firestore whenever user is logged in
+  const initialSyncDone = useRef({ pins: false, cats: false, persons: false });
+
+  // Sync with Firestore whenever user is logged in
   useEffect(() => {
     if (!user) return;
 
     const userId = user.uid;
-    const pinsPath = `users/${userId}/pins`;
-    const categoriesPath = `users/${userId}/categories`;
-    const mapsPath = `users/${userId}/maps`;
 
     // 1. Sync Pins from Firestore
     const unsubPins = onSnapshot(
@@ -183,36 +184,23 @@ export default function App() {
           cloudPins.push(docSnap.data() as Pin);
         });
 
-        if (cloudPins.length > 0) {
-          const localPins = getLocalPins();
-          const cloudIds = new Set(cloudPins.map((p) => p.id));
-          const unpushed = localPins.filter((p) => !cloudIds.has(p.id));
-          if (unpushed.length > 0) {
-            unpushed.forEach(async (p) => {
-              const updatedPin = { ...p, userId };
-              try {
-                await setDoc(doc(db, 'users', userId, 'pins', updatedPin.id), updatedPin);
-              } catch (err) {
-                console.warn('Syncing unpushed pin:', err);
-              }
-            });
-          }
-          const allPins = [...cloudPins, ...unpushed.map((p) => ({ ...p, userId }))];
-          setPins(allPins);
-          saveLocalPins(allPins);
-        } else {
-          // Push existing local pins to cloud
+        if (cloudPins.length === 0 && !initialSyncDone.current.pins) {
+          initialSyncDone.current.pins = true;
           const localPins = getLocalPins();
           if (localPins.length > 0) {
             localPins.forEach(async (p) => {
               const updatedPin = { ...p, userId };
               try {
-                await setDoc(doc(db, 'users', userId, 'pins', updatedPin.id), updatedPin);
+                await setDoc(doc(db, 'users', userId, 'pins', updatedPin.id), sanitizeForFirestore(updatedPin));
               } catch (err) {
                 console.warn('Initial pin sync note:', err);
               }
             });
           }
+        } else {
+          initialSyncDone.current.pins = true;
+          setPins(cloudPins);
+          saveLocalPins(cloudPins);
         }
       },
       (error) => {
@@ -229,35 +217,23 @@ export default function App() {
           cloudCats.push(docSnap.data() as Category);
         });
 
-        if (cloudCats.length > 0) {
-          const localCats = getLocalCategories();
-          const cloudIds = new Set(cloudCats.map((c) => c.id));
-          const unpushed = localCats.filter((c) => !cloudIds.has(c.id));
-          if (unpushed.length > 0) {
-            unpushed.forEach(async (c) => {
-              const updated = { ...c, userId };
-              try {
-                await setDoc(doc(db, 'users', userId, 'categories', updated.id), updated);
-              } catch (err) {
-                console.warn('Syncing unpushed category:', err);
-              }
-            });
-          }
-          const allCats = [...cloudCats, ...unpushed.map((c) => ({ ...c, userId }))];
-          setCategories(allCats);
-          saveLocalCategories(allCats);
-        } else {
+        if (cloudCats.length === 0 && !initialSyncDone.current.cats) {
+          initialSyncDone.current.cats = true;
           const localCats = getLocalCategories();
           if (localCats.length > 0) {
             localCats.forEach(async (c) => {
               const updated = { ...c, userId };
               try {
-                await setDoc(doc(db, 'users', userId, 'categories', updated.id), updated);
+                await setDoc(doc(db, 'users', userId, 'categories', updated.id), sanitizeForFirestore(updated));
               } catch (err) {
                 console.warn('Initial category sync note:', err);
               }
             });
           }
+        } else {
+          initialSyncDone.current.cats = true;
+          setCategories(cloudCats);
+          saveLocalCategories(cloudCats);
         }
       },
       (error) => {
@@ -316,35 +292,23 @@ export default function App() {
           cloudPersons.push(docSnap.data() as PersonBot);
         });
 
-        if (cloudPersons.length > 0) {
-          const localPersons = getLocalPersons();
-          const cloudIds = new Set(cloudPersons.map((p) => p.id));
-          const unpushed = localPersons.filter((p) => !cloudIds.has(p.id));
-          if (unpushed.length > 0) {
-            unpushed.forEach(async (p) => {
-              const updated = { ...p, userId };
-              try {
-                await setDoc(doc(db, 'users', userId, 'persons', updated.id), updated);
-              } catch (err) {
-                console.warn('Syncing unpushed person:', err);
-              }
-            });
-          }
-          const allPersons = [...cloudPersons, ...unpushed.map((p) => ({ ...p, userId }))];
-          setPersons(allPersons);
-          saveLocalPersons(allPersons);
-        } else {
+        if (cloudPersons.length === 0 && !initialSyncDone.current.persons) {
+          initialSyncDone.current.persons = true;
           const localPersons = getLocalPersons();
           if (localPersons.length > 0) {
             localPersons.forEach(async (p) => {
               const updated = { ...p, userId };
               try {
-                await setDoc(doc(db, 'users', userId, 'persons', updated.id), updated);
+                await setDoc(doc(db, 'users', userId, 'persons', updated.id), sanitizeForFirestore(updated));
               } catch (err) {
                 console.warn('Initial person sync note:', err);
               }
             });
           }
+        } else {
+          initialSyncDone.current.persons = true;
+          setPersons(cloudPersons);
+          saveLocalPersons(cloudPersons);
         }
       },
       (error) => {
@@ -514,7 +478,7 @@ export default function App() {
         const pinToSave = updatedPins.find((p) => p.id === pinId);
         if (pinToSave) {
           try {
-            await setDoc(doc(db, 'users', user.uid, 'pins', pinId), pinToSave, { merge: true });
+            await setDoc(doc(db, 'users', user.uid, 'pins', pinId), sanitizeForFirestore(pinToSave), { merge: true });
           } catch (err) {
             handleFirestoreError(err, OperationType.UPDATE, path);
           }
@@ -538,7 +502,7 @@ export default function App() {
       if (user) {
         const path = `users/${user.uid}/pins/${newPin.id}`;
         try {
-          await setDoc(doc(db, 'users', user.uid, 'pins', newPin.id), newPin);
+          await setDoc(doc(db, 'users', user.uid, 'pins', newPin.id), sanitizeForFirestore(newPin));
         } catch (err) {
           handleFirestoreError(err, OperationType.WRITE, path);
         }
@@ -585,7 +549,7 @@ export default function App() {
     if (user) {
       const path = `users/${user.uid}/categories/${newCategory.id}`;
       try {
-        await setDoc(doc(db, 'users', user.uid, 'categories', newCategory.id), newCategory);
+        await setDoc(doc(db, 'users', user.uid, 'categories', newCategory.id), sanitizeForFirestore(newCategory));
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, path);
       }
@@ -711,7 +675,7 @@ export default function App() {
 
     if (user) {
       try {
-        await setDoc(doc(db, 'users', user.uid, 'persons', personId), newPerson);
+        await setDoc(doc(db, 'users', user.uid, 'persons', personId), sanitizeForFirestore(newPerson));
       } catch (err) {
         console.warn('Firestore add person error:', err);
       }
@@ -791,7 +755,7 @@ export default function App() {
 
     if (user) {
       try {
-        await setDoc(doc(db, 'users', user.uid, 'persons', personId), updatedPerson);
+        await setDoc(doc(db, 'users', user.uid, 'persons', personId), sanitizeForFirestore(updatedPerson));
       } catch (err) {
         console.warn('Firestore update person error:', err);
       }
@@ -842,7 +806,7 @@ export default function App() {
 
     if (user) {
       try {
-        await setDoc(doc(db, 'users', user.uid, 'persons', personId), updatedPerson);
+        await setDoc(doc(db, 'users', user.uid, 'persons', personId), sanitizeForFirestore(updatedPerson));
       } catch (err) {
         console.warn('Firestore log coins error:', err);
       }
@@ -869,7 +833,7 @@ export default function App() {
 
     if (user) {
       try {
-        await setDoc(doc(db, 'users', user.uid, 'persons', personId), updatedPerson);
+        await setDoc(doc(db, 'users', user.uid, 'persons', personId), sanitizeForFirestore(updatedPerson));
       } catch (err) {
         console.warn('Firestore delete log error:', err);
       }

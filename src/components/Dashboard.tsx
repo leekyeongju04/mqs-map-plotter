@@ -20,6 +20,11 @@ import {
   Bot,
   Wallet,
   Coins,
+  TrendingUp,
+  Sparkles,
+  Trophy,
+  AlertTriangle,
+  X,
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -86,6 +91,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [sortAsc, setSortAsc] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Confirmation prompts state
+  const [pinToDelete, setPinToDelete] = useState<Pin | null>(null);
+  const [categoryToDelete, setCategoryToDelete] = useState<Category | null>(null);
+
   // Pre-calculate daily coin accumulation rate for each pin based on all logged coins
   const pinDailyStatsMap = useMemo(() => {
     return calculateAllPinsDailyStats(pins, persons);
@@ -108,6 +117,62 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }
     }
     return best;
+  }, [pins, pinDailyStatsMap]);
+ 
+  // Filter for the Gold Yield section: 'all' pins or 'active' (yielding) only
+  const [goldYieldFilter, setGoldYieldFilter] = useState<'all' | 'active'>('all');
+
+  // Map of bots assigned to each pin
+  const assignedBotsByPinId = useMemo(() => {
+    const map: Record<string, PersonBot[]> = {};
+    for (const person of persons) {
+      if (person.assignedPinId) {
+        if (!map[person.assignedPinId]) {
+          map[person.assignedPinId] = [];
+        }
+        map[person.assignedPinId].push(person);
+      }
+    }
+    return map;
+  }, [persons]);
+
+  // Pins sorted by Gold Yield Per Day (descending)
+  const pinsYieldList = useMemo(() => {
+    const sorted = [...pins].sort((a, b) => {
+      const yieldA = pinDailyStatsMap[a.id]?.coinsPerDay || 0;
+      const yieldB = pinDailyStatsMap[b.id]?.coinsPerDay || 0;
+      if (yieldB !== yieldA) return yieldB - yieldA;
+      const totalA = pinDailyStatsMap[a.id]?.totalCoins || 0;
+      const totalB = pinDailyStatsMap[b.id]?.totalCoins || 0;
+      if (totalB !== totalA) return totalB - totalA;
+      return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+    });
+
+    if (goldYieldFilter === 'active') {
+      return sorted.filter((pin) => {
+        const s = pinDailyStatsMap[pin.id];
+        return s && (s.coinsPerDay > 0 || s.totalCoins > 0);
+      });
+    }
+    return sorted;
+  }, [pins, pinDailyStatsMap, goldYieldFilter]);
+
+  // Max yield rate among all pins (used to scale progress bars)
+  const maxPinYield = useMemo(() => {
+    let max = 0;
+    for (const pin of pins) {
+      const y = pinDailyStatsMap[pin.id]?.coinsPerDay || 0;
+      if (y > max) max = y;
+    }
+    return max || 1;
+  }, [pins, pinDailyStatsMap]);
+
+  // Total pins currently producing yield
+  const pinsWithYieldCount = useMemo(() => {
+    return pins.filter((p) => {
+      const s = pinDailyStatsMap[p.id];
+      return s && (s.coinsPerDay > 0 || s.totalCoins > 0);
+    }).length;
   }, [pins, pinDailyStatsMap]);
 
   // Filtered & Sorted Pins (for Pins tab)
@@ -368,7 +433,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       <span className="font-medium text-slate-800">{cat.name}</span>
                       <span className="text-slate-400 font-mono text-[10px]">({count})</span>
                       <button
-                        onClick={() => onDeleteCategory(cat.id)}
+                        onClick={() => setCategoryToDelete(cat)}
                         className="text-slate-300 hover:text-red-500 transition-colors ml-1 cursor-pointer"
                         title="Delete custom category"
                         aria-label="Delete custom category"
@@ -378,6 +443,225 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                   );
                 })}
+              </div>
+            )}
+          </div>
+
+          {/* --- SECTION: GOLD YIELD PER DAY IN EACH PIN --- */}
+          <div className="bg-white rounded-2xl border border-amber-200/90 shadow-xs overflow-hidden">
+            {/* Header */}
+            <div className="p-4 sm:p-5 bg-gradient-to-r from-amber-500/10 via-amber-50/50 to-transparent border-b border-amber-100/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 text-white flex items-center justify-center shadow-xs shrink-0">
+                  <Coins className="w-5 h-5 text-amber-50" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-1.5">
+                      <span>Gold Yield Per Day</span>
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-200/80">
+                      Live Output
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Daily gold yield rate calculated for each landmark pin based on bot coin logs.
+                  </p>
+                </div>
+              </div>
+
+              {/* Stats pill & View Filters */}
+              <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
+                <div className="px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200/80 flex items-center gap-2 shrink-0">
+                  <span className="text-[11px] font-medium text-amber-800">Total Projection:</span>
+                  <span className="text-sm font-bold font-mono text-amber-700 flex items-center gap-1">
+                    <Coins className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    +{totalDailyCoinsYield.toLocaleString()}{' '}
+                    <span className="text-[11px] font-normal text-amber-600/80">/day</span>
+                  </span>
+                </div>
+
+                {/* Filter toggle: All Pins vs Producing Only */}
+                <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-50 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setGoldYieldFilter('all')}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                      goldYieldFilter === 'all'
+                        ? 'bg-white text-slate-900 font-semibold shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    All Pins ({pins.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setGoldYieldFilter('active')}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                      goldYieldFilter === 'active'
+                        ? 'bg-white text-amber-800 font-semibold shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Yielding ({pinsWithYieldCount})
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Pins Gold Yield Content */}
+            {pins.length === 0 ? (
+              <div className="p-8 text-center text-slate-400">
+                <MapPin className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                <p className="text-xs">No pins created yet. Add pins on the map to start tracking gold yield.</p>
+              </div>
+            ) : pinsYieldList.length === 0 ? (
+              <div className="p-8 text-center text-slate-500">
+                <Coins className="w-8 h-8 mx-auto mb-2 text-amber-400" />
+                <p className="text-xs font-semibold text-slate-700">No active gold yield logged yet</p>
+                <p className="text-[11px] text-slate-400 mt-1 max-w-sm mx-auto">
+                  Assign bots to your pins in the Bots tab and log coins to see daily gold generation rates here.
+                </p>
+              </div>
+            ) : (
+              <div className="p-4 sm:p-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                  {pinsYieldList.map((pin, idx) => {
+                    const stats = pinDailyStatsMap[pin.id] || {
+                      totalCoins: 0,
+                      coinsPerDay: 0,
+                      todayCoins: 0,
+                      logCount: 0,
+                    };
+                    const assignedBots = assignedBotsByPinId[pin.id] || [];
+                    const pinMapMeta = mapsList.find((m) => m.id === pin.mapId);
+                    const yieldRatio = maxPinYield > 0 ? Math.min(100, Math.round((stats.coinsPerDay / maxPinYield) * 100)) : 0;
+
+                    return (
+                      <div
+                        key={pin.id}
+                        className={`rounded-xl border p-3.5 flex flex-col justify-between transition-all ${
+                          stats.coinsPerDay > 0
+                            ? 'bg-white border-amber-200/90 hover:border-amber-400 hover:shadow-xs'
+                            : 'bg-slate-50/60 border-slate-200/80 hover:bg-white hover:border-slate-300'
+                        }`}
+                      >
+                        <div>
+                          {/* Card Top: Rank/Icon, Pin Name, Category, Locate Button */}
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div
+                                className="w-8 h-8 rounded-lg flex items-center justify-center text-white shrink-0 shadow-2xs relative"
+                                style={{ backgroundColor: pin.color }}
+                              >
+                                <PinIcon name={pin.icon} className="w-4 h-4 stroke-[2.5]" />
+                                {stats.coinsPerDay > 0 && idx < 3 && (
+                                  <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-amber-400 text-amber-950 text-[9px] font-black flex items-center justify-center border border-white">
+                                    {idx + 1}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="min-w-0">
+                                <h4 className="font-bold text-slate-900 text-xs sm:text-sm truncate" title={pin.name}>
+                                  {pin.name}
+                                </h4>
+                                <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5 truncate">
+                                  <span className="truncate">{pinMapMeta?.name || 'Map'}</span>
+                                  <span>•</span>
+                                  <span className="truncate text-slate-600 font-medium">{pin.categoryName || 'General'}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Locate on Map button (Icon Only) */}
+                            <button
+                              type="button"
+                              onClick={() => onLocatePinOnMap(pin)}
+                              title="Locate Pin on Map"
+                              aria-label="Locate Pin on Map"
+                              className="p-1.5 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-colors cursor-pointer shrink-0"
+                            >
+                              <Crosshair className="w-4 h-4" />
+                            </button>
+                          </div>
+
+                          {/* Primary Metric: Gold Yield Per Day */}
+                          <div className="mt-3 p-2.5 rounded-lg bg-amber-50/70 border border-amber-200/60 flex items-center justify-between">
+                            <span className="text-[11px] font-semibold text-amber-900 flex items-center gap-1">
+                              <Coins className="w-3.5 h-3.5 text-amber-500" />
+                              Daily Yield:
+                            </span>
+                            <span className="text-sm font-bold font-mono text-amber-700 tabular-nums">
+                              {stats.coinsPerDay > 0 ? `+${stats.coinsPerDay.toLocaleString()} gold/day` : '0 gold/day'}
+                            </span>
+                          </div>
+
+                          {/* Yield Progress Bar relative to highest pin */}
+                          {maxPinYield > 0 && stats.coinsPerDay > 0 && (
+                            <div className="mt-2 w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                              <div
+                                className="bg-gradient-to-r from-amber-400 to-amber-500 h-1.5 rounded-full transition-all duration-300"
+                                style={{ width: `${Math.max(8, yieldRatio)}%` }}
+                              />
+                            </div>
+                          )}
+
+                          {/* Sub-metrics: Today & Total */}
+                          <div className="grid grid-cols-2 gap-2 mt-2.5 text-[11px] text-slate-500">
+                            <div className="bg-slate-50 px-2 py-1 rounded border border-slate-100 font-mono">
+                              <span className="text-slate-400 text-[10px] block">Today</span>
+                              <span className="font-semibold text-slate-800">
+                                {stats.todayCoins.toLocaleString()} gold
+                              </span>
+                            </div>
+                            <div className="bg-slate-50 px-2 py-1 rounded border border-slate-100 font-mono">
+                              <span className="text-slate-400 text-[10px] block">All-Time Total</span>
+                              <span className="font-semibold text-slate-800">
+                                {stats.totalCoins.toLocaleString()} gold
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Footer: Assigned Bots */}
+                        <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between gap-1 text-[11px]">
+                          <div className="flex items-center gap-1 text-slate-500 min-w-0">
+                            <Bot className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span className="text-slate-400">Bots:</span>
+                            {assignedBots.length === 0 ? (
+                              <span className="italic text-slate-400 text-[10px]">None assigned</span>
+                            ) : (
+                              <div className="flex items-center gap-1 overflow-hidden truncate">
+                                {assignedBots.slice(0, 2).map((b) => (
+                                  <span
+                                    key={b.id}
+                                    className={`px-1.5 py-0.2 rounded text-[10px] font-mono font-medium truncate ${
+                                      b.status === 'banned'
+                                        ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                        : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                    }`}
+                                    title={`${b.name} (${b.status || 'working'})`}
+                                  >
+                                    {b.botNumber ? b.botNumber : b.name}
+                                  </span>
+                                ))}
+                                {assignedBots.length > 2 && (
+                                  <span className="text-[10px] text-slate-400 font-mono font-semibold">
+                                    +{assignedBots.length - 2}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                            {stats.logCount} {stats.logCount === 1 ? 'log' : 'logs'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
@@ -443,7 +727,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               >
                 <option value="date">Sort: Date Created</option>
                 <option value="name">Sort: Name (A-Z / 0-9)</option>
-                <option value="coins">Sort: Est. Coins / Day</option>
+                <option value="coins">Sort: Gold Yield / Day</option>
                 <option value="x">Sort: X Coordinate</option>
                 <option value="y">Sort: Y Coordinate</option>
               </select>
@@ -492,7 +776,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       <th className="py-3 px-3">Category</th>
                       <th className="py-3 px-3">Exact Pixels (X, Y)</th>
                       <th className="py-3 px-3">Percent (%)</th>
-                      <th className="py-3 px-3">Est. Coins / Day</th>
+                      <th className="py-3 px-3">Gold Yield / Day</th>
                       <th className="py-3 px-3">Description</th>
                       <th className="py-3 px-3">Created</th>
                       <th className="py-3 px-4 text-right">Actions</th>
@@ -551,7 +835,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                               if (!stat || (stat.coinsPerDay === 0 && stat.totalCoins === 0)) {
                                 return (
                                   <span className="text-slate-300 font-mono text-[11px] italic">
-                                    0 / day
+                                    0 gold / day
                                   </span>
                                 );
                               }
@@ -559,7 +843,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 <div className="flex flex-col">
                                   <span className="font-semibold text-amber-600 font-mono flex items-center gap-1 text-xs">
                                     <Coins className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                                    +{stat.coinsPerDay.toLocaleString()} / day
+                                    +{stat.coinsPerDay.toLocaleString()} gold / day
                                   </span>
                                   <span className="text-[10px] text-slate-400 font-mono">
                                     Total: {stat.totalCoins.toLocaleString()} • Today: {stat.todayCoins.toLocaleString()}
@@ -596,7 +880,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                 <Edit2 className="w-3.5 h-3.5" />
                               </button>
                               <button
-                                onClick={() => onDeletePin(pin.id)}
+                                onClick={() => setPinToDelete(pin)}
                                 className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                                 title="Delete Pin"
                                 aria-label="Delete Pin"
@@ -631,6 +915,92 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {/* --- TAB 3: BUDGET (Under Construction) --- */}
       {activeDashboardTab === 'budget' && <BudgetTab />}
+
+      {/* --- CONFIRMATION MODAL: Delete Landmark Pin --- */}
+      {pinToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm overflow-hidden p-5 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Delete Landmark Pin</h3>
+                <p className="text-xs text-slate-500">This action cannot be undone.</p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-600 mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
+              Are you sure you want to delete landmark pin <strong>{pinToDelete.name}</strong>?
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPinToDelete(null)}
+                title="Cancel"
+                aria-label="Cancel"
+                className="p-2 text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDeletePin(pinToDelete.id);
+                  setPinToDelete(null);
+                }}
+                title="Confirm Delete"
+                aria-label="Confirm Delete"
+                className="p-2 text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-xs cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- CONFIRMATION MODAL: Delete Category --- */}
+      {categoryToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm overflow-hidden p-5 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-red-50 text-red-600 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Delete Category</h3>
+                <p className="text-xs text-slate-500">Pins in this category will keep their coordinates.</p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-600 mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
+              Are you sure you want to delete category <strong>{categoryToDelete.name}</strong>?
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setCategoryToDelete(null)}
+                title="Cancel"
+                aria-label="Cancel"
+                className="p-2 text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDeleteCategory(categoryToDelete.id);
+                  setCategoryToDelete(null);
+                }}
+                title="Confirm Delete"
+                aria-label="Confirm Delete"
+                className="p-2 text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-xs cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
