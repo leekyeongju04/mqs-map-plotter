@@ -135,26 +135,26 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
               <button
                 onClick={onSignOut}
-                title="Sign out"
-                className="p-1.5 sm:px-2.5 sm:py-1.5 text-xs font-medium text-slate-600 hover:text-red-600 hover:bg-red-50 border border-slate-200 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                title="Sign Out"
+                aria-label="Sign Out"
+                className="p-2 text-xs font-medium text-slate-600 hover:text-red-600 hover:bg-red-50 border border-slate-200 rounded-xl transition-colors cursor-pointer"
               >
-                <LogOut className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Sign Out</span>
+                <LogOut className="w-4 h-4" />
               </button>
             </div>
           ) : (
             <div className="flex items-center gap-2">
               <span className="hidden md:inline-flex items-center gap-1 text-[11px] text-slate-500">
-                <HardDrive className="w-3 h-3 text-slate-400" />
-                Local Mode
+                <HardDrive className="w-3.5 h-3.5 text-slate-400" />
+                Local
               </span>
               <button
                 onClick={onOpenAuthModal}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-sky-600 hover:bg-sky-700 rounded-lg transition-colors shadow-xs cursor-pointer"
+                className="p-2 text-white bg-sky-600 hover:bg-sky-700 rounded-xl transition-colors shadow-xs cursor-pointer"
                 title="Sync maps and pins to your Google cloud account"
+                aria-label="Sync maps and pins to your Google cloud account"
               >
-                <Cloud className="w-3.5 h-3.5" />
-                <span>Sync with Google</span>
+                <Cloud className="w-4 h-4" />
               </button>
             </div>
           )}

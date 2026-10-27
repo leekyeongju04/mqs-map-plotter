@@ -638,11 +638,11 @@ export const MapPlotter: React.FC<MapPlotterProps> = ({
               {onOpenMapManager && (
                 <button
                   onClick={onOpenMapManager}
-                  className="px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                  className="p-1.5 text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center justify-center cursor-pointer"
                   title="Switch between maps or upload new maps"
+                  aria-label="Switch between maps or upload new maps"
                 >
-                  <Layers className="w-3 h-3 text-sky-600" />
-                  <span>Switch Map</span>
+                  <Layers className="w-3.5 h-3.5 text-sky-600" />
                 </button>
               )}
             </div>

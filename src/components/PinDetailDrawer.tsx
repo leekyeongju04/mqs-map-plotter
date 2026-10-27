@@ -86,21 +86,21 @@ export const PinDetailDrawer: React.FC<PinDetailDrawerProps> = ({
       <div className="flex items-center gap-1.5 pt-2 border-t border-slate-100">
         <button
           onClick={handleCopyCoords}
-          className="flex-1 py-1.5 px-2 text-xs font-medium text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center justify-center gap-1"
-          title="Copy coordinates"
+          className="p-1.5 text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center justify-center cursor-pointer"
+          title={copied ? 'Coordinates Copied!' : 'Copy Coordinates'}
+          aria-label={copied ? 'Coordinates Copied!' : 'Copy Coordinates'}
         >
-          {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-          <span>{copied ? 'Copied' : 'Copy'}</span>
+          {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
         </button>
 
         {onSolveForPin && (
           <button
             onClick={() => onSolveForPin(pin)}
-            className="flex-1 py-1.5 px-2 text-xs font-medium text-sky-700 hover:text-sky-800 bg-sky-50 hover:bg-sky-100 rounded-lg transition-colors flex items-center justify-center gap-1"
-            title="Inspect in Solver tab"
+            className="p-1.5 text-sky-700 hover:text-sky-800 bg-sky-50 hover:bg-sky-100 rounded-lg transition-colors flex items-center justify-center cursor-pointer"
+            title="Inspect in Solver"
+            aria-label="Inspect in Solver"
           >
-            <Navigation className="w-3.5 h-3.5 text-sky-600" />
-            <span>Solve</span>
+            <Navigation className="w-4 h-4 text-sky-600" />
           </button>
         )}
 

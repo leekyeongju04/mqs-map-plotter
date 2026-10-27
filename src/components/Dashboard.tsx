@@ -4,6 +4,7 @@ import { PinIcon } from './PinIcon';
 import { exportDataAsJson, calculateAllPinsDailyStats } from '../utils/storage';
 import { BotsTab } from './BotsTab';
 import { BudgetTab } from './BudgetTab';
+import { usePWAInstall } from '../hooks/usePWAInstall';
 import {
   Search,
   Download,
@@ -25,6 +26,15 @@ import {
   Trophy,
   AlertTriangle,
   X,
+  Smartphone,
+  Check,
+  Award,
+  Clock,
+  Copy,
+  CheckCheck,
+  ShieldAlert,
+  ArrowRight,
+  Filter,
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -91,9 +101,16 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [sortAsc, setSortAsc] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Copy feedback state for coordinates
+  const [copiedCoordPinId, setCopiedCoordPinId] = useState<string | null>(null);
+
   // Confirmation prompts state
   const [pinToDelete, setPinToDelete] = useState<Pin | null>(null);
   const [categoryToDelete, setCategoryToDelete] = useState<Category | null>(null);
+
+  // PWA / APK modal state
+  const [isApkModalOpen, setIsApkModalOpen] = useState(false);
+  const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
 
   // Pre-calculate daily coin accumulation rate for each pin based on all logged coins
   const pinDailyStatsMap = useMemo(() => {
@@ -104,6 +121,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const totalDailyCoinsYield = useMemo(() => {
     return Object.values(pinDailyStatsMap).reduce((sum, s) => sum + s.coinsPerDay, 0);
   }, [pinDailyStatsMap]);
+
+  // Hourly projection rate
+  const totalHourlyCoinsYield = useMemo(() => {
+    return Math.round(totalDailyCoinsYield / 24);
+  }, [totalDailyCoinsYield]);
+
+  // Bot workforce metrics
+  const botStats = useMemo(() => {
+    const working = persons.filter((p) => (p.status || 'working') === 'working').length;
+    const banned = persons.filter((p) => p.status === 'banned').length;
+    return { total: persons.length, working, banned };
+  }, [persons]);
 
   // Top performing pin by daily coin rate
   const topDailyPin = useMemo(() => {
@@ -118,9 +147,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
     return best;
   }, [pins, pinDailyStatsMap]);
- 
+
   // Filter for the Gold Yield section: 'all' pins or 'active' (yielding) only
   const [goldYieldFilter, setGoldYieldFilter] = useState<'all' | 'active'>('all');
+  const [goldYieldSearch, setGoldYieldSearch] = useState('');
 
   // Map of bots assigned to each pin
   const assignedBotsByPinId = useMemo(() => {
@@ -148,14 +178,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
     });
 
+    let list = sorted;
     if (goldYieldFilter === 'active') {
-      return sorted.filter((pin) => {
+      list = list.filter((pin) => {
         const s = pinDailyStatsMap[pin.id];
         return s && (s.coinsPerDay > 0 || s.totalCoins > 0);
       });
     }
-    return sorted;
-  }, [pins, pinDailyStatsMap, goldYieldFilter]);
+
+    if (goldYieldSearch.trim()) {
+      const q = goldYieldSearch.toLowerCase();
+      list = list.filter(
+        (pin) =>
+          pin.name.toLowerCase().includes(q) ||
+          pin.categoryName.toLowerCase().includes(q)
+      );
+    }
+
+    return list;
+  }, [pins, pinDailyStatsMap, goldYieldFilter, goldYieldSearch]);
 
   // Max yield rate among all pins (used to scale progress bars)
   const maxPinYield = useMemo(() => {
@@ -213,6 +254,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
       return sortAsc ? tA - tB : tB - tA;
     });
 
+  const handleCopyCoords = (pin: Pin) => {
+    const text = `${pin.pixelX}, ${pin.pixelY}`;
+    navigator.clipboard?.writeText(text);
+    setCopiedCoordPinId(pin.id);
+    setTimeout(() => {
+      setCopiedCoordPinId(null);
+    }, 2000);
+  };
+
   const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -236,181 +286,293 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-      {/* Dashboard Sub-Tabs Header: Pins, Bots, Budget */}
-      <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
-        {/* Pins Tab */}
-        <button
-          type="button"
-          onClick={() => setActiveDashboardTab('pins')}
-          className={`flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all cursor-pointer ${
-            activeDashboardTab === 'pins'
-              ? 'bg-slate-900 text-white shadow-xs'
-              : 'text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-50 border border-slate-200'
-          }`}
-        >
-          <MapPin className="w-4 h-4" />
-          <span>Pins</span>
-          <span
-            className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+      {/* =========================================================================
+          TOP COMMAND BAR: Segmented Sub-Tabs + Icon-Only Quick Actions
+          ========================================================================= */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-2.5 sm:p-3 rounded-2xl border border-slate-200/90 shadow-xs">
+        {/* Sub-Tabs: Pins, Bots, Budget */}
+        <div className="inline-flex p-1 bg-slate-100/90 rounded-xl border border-slate-200/80 gap-1">
+          {/* Pins Tab Button */}
+          <button
+            type="button"
+            onClick={() => setActiveDashboardTab('pins')}
+            title="Landmark Pins & Gold Yield Dashboard"
+            aria-label="Pins Tab"
+            className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
               activeDashboardTab === 'pins'
-                ? 'bg-slate-800 text-slate-200'
-                : 'bg-slate-100 text-slate-700'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
             }`}
           >
-            {pins.length}
-          </span>
-        </button>
+            <MapPin className="w-4 h-4 shrink-0" />
+            <span className="font-medium">Pins</span>
+            <span
+              className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono tabular-nums ${
+                activeDashboardTab === 'pins'
+                  ? 'bg-slate-800 text-slate-200'
+                  : 'bg-slate-200 text-slate-700'
+              }`}
+            >
+              {pins.length}
+            </span>
+          </button>
 
-        {/* Bots Tab */}
-        <button
-          type="button"
-          onClick={() => setActiveDashboardTab('bots')}
-          className={`flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all cursor-pointer ${
-            activeDashboardTab === 'bots'
-              ? 'bg-slate-900 text-white shadow-xs'
-              : 'text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-50 border border-slate-200'
-          }`}
-        >
-          <Bot className="w-4 h-4" />
-          <span>Bots</span>
-          <span
-            className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+          {/* Bots Tab Button */}
+          <button
+            type="button"
+            onClick={() => setActiveDashboardTab('bots')}
+            title="Bot & Worker Farming Roster"
+            aria-label="Bots Tab"
+            className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
               activeDashboardTab === 'bots'
-                ? 'bg-slate-800 text-slate-200'
-                : 'bg-slate-100 text-slate-700'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
             }`}
           >
-            {persons.length}
-          </span>
-        </button>
+            <Bot className="w-4 h-4 shrink-0" />
+            <span className="font-medium">Bots</span>
+            <span
+              className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono tabular-nums ${
+                activeDashboardTab === 'bots'
+                  ? 'bg-slate-800 text-slate-200'
+                  : 'bg-slate-200 text-slate-700'
+              }`}
+            >
+              {persons.length}
+            </span>
+          </button>
 
-        {/* Budget Tab (under construction) */}
-        <button
-          type="button"
-          onClick={() => setActiveDashboardTab('budget')}
-          className={`flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all cursor-pointer ${
-            activeDashboardTab === 'budget'
-              ? 'bg-slate-900 text-white shadow-xs'
-              : 'text-slate-600 hover:text-slate-900 bg-white hover:bg-slate-50 border border-slate-200'
-          }`}
-        >
-          <Wallet className="w-4 h-4" />
-          <span>Budget</span>
-          <span className="text-[10px] bg-amber-100 text-amber-800 font-medium px-1.5 py-0.2 rounded-full hidden sm:inline">
-            Under Construction
-          </span>
-        </button>
+          {/* Budget Tab Button */}
+          <button
+            type="button"
+            onClick={() => setActiveDashboardTab('budget')}
+            title="Budget & Financial Analytics"
+            aria-label="Budget Tab"
+            className={`flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+              activeDashboardTab === 'budget'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+            }`}
+          >
+            <Wallet className="w-4 h-4 shrink-0" />
+            <span className="font-medium">Budget</span>
+            <span className="w-2 h-2 rounded-full bg-amber-400" title="Coming Soon" />
+          </button>
+        </div>
+
+        {/* Action Tools (Icon Only with Rich Tooltips per user instructions) */}
+        <div className="flex items-center justify-end gap-1.5">
+          {/* Build APK / Mobile App Install Modal Button */}
+          <button
+            type="button"
+            onClick={() => setIsApkModalOpen(true)}
+            title="Build / Install Android APK & PWA"
+            aria-label="Build / Install Android APK & PWA"
+            className="p-2 text-slate-700 hover:text-sky-600 bg-slate-50 hover:bg-sky-50 border border-slate-200 rounded-xl transition-colors cursor-pointer relative shadow-2xs"
+          >
+            <Smartphone className="w-4 h-4" />
+            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-sky-500 animate-pulse" />
+          </button>
+
+          {/* Export JSON Button (Icon Only) */}
+          <button
+            type="button"
+            onClick={() => exportDataAsJson(pins, categories, mapsList)}
+            className="p-2 text-slate-700 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors cursor-pointer shadow-2xs"
+            title="Export JSON Data Backup"
+            aria-label="Export JSON Data Backup"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+
+          {/* Hidden File Input & Import Button (Icon Only) */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json"
+            onChange={handleFileImport}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="p-2 text-slate-700 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors cursor-pointer shadow-2xs"
+            title="Import JSON Data Backup"
+            aria-label="Import JSON Data Backup"
+          >
+            <Upload className="w-4 h-4" />
+          </button>
+
+          {/* New Category Button (Icon Only) */}
+          <button
+            type="button"
+            onClick={onOpenCategoryModal}
+            className="p-2 text-slate-700 hover:text-slate-900 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors cursor-pointer shadow-2xs"
+            title="Add Custom Pin Category"
+            aria-label="Add Custom Pin Category"
+          >
+            <Plus className="w-4 h-4" />
+          </button>
+
+          {/* Switch to Map View (Icon Only) */}
+          <button
+            type="button"
+            onClick={onSwitchToMap}
+            className="p-2 text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer shadow-xs"
+            title="Open Interactive Map Plotter"
+            aria-label="Open Interactive Map Plotter"
+          >
+            <MapIcon className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
-      {/* --- TAB 1: PINS (Contains all current dashboard components) --- */}
+      {/* --- TAB 1: PINS DASHBOARD --- */}
       {activeDashboardTab === 'pins' && (
         <div className="space-y-6">
-          {/* Top Banner & Quick Tools (Buttons use icon only with tooltips) */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-xs">
-            <div>
-              <h2 className="text-xl font-bold tracking-tight text-slate-900">
-                Personal Coordinates Dashboard
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Manage your saved landmark coordinates across all maps, export backups, and inspect locations.
+          {/* =========================================================================
+              METRICS & KPI OVERVIEW CARDS
+              ========================================================================= */}
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3.5">
+            {/* Card 1: Total Saved Pins */}
+            <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-xs hover:border-slate-300 transition-colors">
+              <div className="flex items-center justify-between text-slate-400 mb-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wider">Total Pins</span>
+                <div className="w-7 h-7 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center">
+                  <MapPin className="w-3.5 h-3.5" />
+                </div>
+              </div>
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono tabular-nums">
+                  {pins.length}
+                </span>
+                <span className="text-xs text-slate-400 font-medium">landmarks</span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-1 truncate">
+                Mapped across {mapsList.length} {mapsList.length === 1 ? 'map' : 'maps'}
               </p>
             </div>
 
-            {/* Quick Action Tools (Icon only per user instruction) */}
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => exportDataAsJson(pins, categories, mapsList)}
-                className="p-2 text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
-                title="Export JSON"
-                aria-label="Export JSON"
-              >
-                <Download className="w-4 h-4" />
-              </button>
-
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".json"
-                onChange={handleFileImport}
-                className="hidden"
-              />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="p-2 text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
-                title="Import JSON"
-                aria-label="Import JSON"
-              >
-                <Upload className="w-4 h-4" />
-              </button>
-
-              <button
-                onClick={onOpenCategoryModal}
-                className="p-2 text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors shadow-xs cursor-pointer"
-                title="New Category"
-                aria-label="New Category"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
+            {/* Card 2: Projected Daily Coins (Gold Yield) */}
+            <div className="bg-gradient-to-br from-amber-500/10 via-white to-amber-500/5 p-4 rounded-2xl border border-amber-200/90 shadow-xs hover:border-amber-300 transition-colors relative overflow-hidden">
+              <div className="flex items-center justify-between text-amber-700 mb-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wider flex items-center gap-1.5">
+                  <span>Est. Daily Gold</span>
+                  <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                </span>
+                <div className="w-7 h-7 rounded-lg bg-amber-500 text-white flex items-center justify-center shadow-xs">
+                  <Coins className="w-3.5 h-3.5" />
+                </div>
+              </div>
+              <div className="flex items-baseline gap-1">
+                <span className="text-2xl sm:text-3xl font-extrabold text-amber-600 font-mono tabular-nums">
+                  +{totalDailyCoinsYield.toLocaleString()}
+                </span>
+                <span className="text-xs text-amber-700/80 font-normal">/day</span>
+              </div>
+              <p className="text-[11px] text-amber-700/70 font-mono mt-1">
+                ~{totalHourlyCoinsYield.toLocaleString()} gold / hour
+              </p>
             </div>
-          </div>
 
-          {/* Metrics Row */}
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-              <span className="text-xs text-slate-400 block font-medium">Total Saved Pins</span>
-              <span className="text-2xl font-bold text-slate-900 font-mono tabular-nums">
-                {pins.length}
-              </span>
-            </div>
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-              <span className="text-xs text-slate-400 block font-medium">Est. Daily Coins</span>
-              <span className="text-2xl font-bold text-amber-600 font-mono tabular-nums flex items-center gap-1">
-                <Coins className="w-5 h-5 text-amber-500 shrink-0" />
-                {totalDailyCoinsYield.toLocaleString()}
-                <span className="text-xs text-slate-400 font-normal">/day</span>
-              </span>
-            </div>
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-              <span className="text-xs text-slate-400 block font-medium">Top Yield Pin</span>
+            {/* Card 3: Top Yielding Landmark Pin */}
+            <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-xs hover:border-slate-300 transition-colors">
+              <div className="flex items-center justify-between text-slate-400 mb-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wider">Top Pin Yield</span>
+                <div className="w-7 h-7 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center">
+                  <Trophy className="w-3.5 h-3.5" />
+                </div>
+              </div>
               {topDailyPin ? (
-                <div className="mt-1">
-                  <span className="text-sm font-semibold text-slate-900 truncate block">
-                    {topDailyPin.pin.name}
-                  </span>
-                  <span className="text-xs text-amber-600 font-mono font-medium">
-                    +{topDailyPin.stats.coinsPerDay.toLocaleString()}/day
+                <div>
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-sm font-bold text-slate-900 truncate block" title={topDailyPin.pin.name}>
+                      {topDailyPin.pin.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onLocatePinOnMap(topDailyPin.pin)}
+                      title="Locate Top Pin on Map"
+                      aria-label="Locate Top Pin on Map"
+                      className="p-1 text-slate-400 hover:text-sky-600 rounded transition-colors cursor-pointer"
+                    >
+                      <Crosshair className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <span className="text-xs text-amber-600 font-mono font-bold block mt-0.5">
+                    +{topDailyPin.stats.coinsPerDay.toLocaleString()} gold/day
                   </span>
                 </div>
               ) : (
-                <span className="text-xs text-slate-400 italic block mt-2">No coins logged yet</span>
+                <div className="mt-2">
+                  <span className="text-xs text-slate-400 italic block">No yield logged yet</span>
+                  <span className="text-[10px] text-slate-400 block mt-0.5">Assign bots in Bots tab</span>
+                </div>
               )}
             </div>
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-              <span className="text-xs text-slate-400 block font-medium">Active Map</span>
-              <span className="text-sm font-semibold text-slate-900 truncate block mt-1">
+
+            {/* Card 4: Workforce / Bot Operations */}
+            <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-xs hover:border-slate-300 transition-colors">
+              <div className="flex items-center justify-between text-slate-400 mb-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wider">Farming Workforce</span>
+                <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                  <Bot className="w-3.5 h-3.5" />
+                </div>
+              </div>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono tabular-nums">
+                  {botStats.total}
+                </span>
+                <span className="text-xs text-slate-500 font-medium">bots</span>
+              </div>
+              <div className="flex items-center gap-2 mt-1 text-[11px] font-mono">
+                <span className="text-emerald-600 font-semibold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  {botStats.working} active
+                </span>
+                {botStats.banned > 0 && (
+                  <span className="text-rose-600 font-semibold flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                    {botStats.banned} banned
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Card 5: Active Map & Dimensions */}
+            <div className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-xs hover:border-slate-300 transition-colors col-span-2 sm:col-span-1">
+              <div className="flex items-center justify-between text-slate-400 mb-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wider">Active Map</span>
+                <div className="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                  <MapIcon className="w-3.5 h-3.5" />
+                </div>
+              </div>
+              <span className="text-sm font-bold text-slate-900 truncate block mt-0.5" title={activeMap.name}>
                 {activeMap.name}
               </span>
-            </div>
-            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-              <span className="text-xs text-slate-400 block font-medium">Custom Categories</span>
-              <span className="text-2xl font-bold text-slate-900 font-mono tabular-nums">
-                {categories.length}
-              </span>
+              <p className="text-[11px] text-slate-400 font-mono mt-1">
+                {activeMap.width} × {activeMap.height} px
+              </p>
             </div>
           </div>
 
-          {/* User Defined Categories Bar */}
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
-            <div className="flex items-center justify-between mb-2.5">
-              <h3 className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                <Layers className="w-3.5 h-3.5 text-slate-500" />
-                <span>Custom Categories ({categories.length})</span>
-              </h3>
+          {/* =========================================================================
+              CUSTOM CATEGORIES STRIP
+              ========================================================================= */}
+          <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/90 shadow-xs">
+            <div className="flex items-center justify-between gap-2 mb-2.5">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-slate-500" />
+                <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                  Custom Categories ({categories.length})
+                </h3>
+              </div>
               <button
+                type="button"
                 onClick={onOpenCategoryModal}
-                className="p-1 text-sky-600 hover:text-sky-700 hover:bg-sky-50 rounded transition-colors cursor-pointer"
-                title="Create Category"
-                aria-label="Create Category"
+                className="p-1.5 text-sky-600 hover:text-sky-700 hover:bg-sky-50 rounded-lg transition-colors cursor-pointer"
+                title="Create New Category"
+                aria-label="Create New Category"
               >
                 <Plus className="w-4 h-4" />
               </button>
@@ -418,25 +580,56 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
             {categories.length === 0 ? (
               <p className="text-xs text-slate-400 italic">
-                No categories created yet. Click "+" above to organize your landmark pins.
+                No categories created yet. Click the "+" button to organize your landmark pins.
               </p>
             ) : (
               <div className="flex flex-wrap gap-2">
                 {categories.map((cat) => {
                   const count = pins.filter((p) => p.categoryId === cat.id).length;
+                  const isSelected = selectedCategoryFilter === cat.id;
                   return (
                     <div
                       key={cat.id}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-slate-50 border border-slate-200/80 rounded-lg text-xs"
+                      className={`group flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs transition-all border ${
+                        isSelected
+                          ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-100/80'
+                      }`}
                     >
-                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: cat.color }} />
-                      <span className="font-medium text-slate-800">{cat.name}</span>
-                      <span className="text-slate-400 font-mono text-[10px]">({count})</span>
                       <button
-                        onClick={() => setCategoryToDelete(cat)}
-                        className="text-slate-300 hover:text-red-500 transition-colors ml-1 cursor-pointer"
-                        title="Delete custom category"
-                        aria-label="Delete custom category"
+                        type="button"
+                        onClick={() => setSelectedCategoryFilter(isSelected ? 'all' : cat.id)}
+                        className="flex items-center gap-2 cursor-pointer"
+                        title={`Filter pins by ${cat.name}`}
+                      >
+                        <span
+                          className="w-2.5 h-2.5 rounded-full shrink-0 shadow-2xs"
+                          style={{ backgroundColor: cat.color }}
+                        />
+                        <span className="font-semibold">{cat.name}</span>
+                        <span
+                          className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+                            isSelected ? 'bg-slate-800 text-slate-200' : 'bg-slate-200 text-slate-600'
+                          }`}
+                        >
+                          {count}
+                        </span>
+                      </button>
+
+                      {/* Delete Category Button (Icon Only) */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCategoryToDelete(cat);
+                        }}
+                        className={`p-1 rounded transition-colors cursor-pointer ${
+                          isSelected
+                            ? 'text-slate-400 hover:text-rose-300'
+                            : 'text-slate-300 hover:text-red-500'
+                        }`}
+                        title={`Delete ${cat.name} category`}
+                        aria-label={`Delete ${cat.name} category`}
                       >
                         <Trash2 className="w-3 h-3" />
                       </button>
@@ -447,60 +640,62 @@ export const Dashboard: React.FC<DashboardProps> = ({
             )}
           </div>
 
-          {/* --- SECTION: GOLD YIELD PER DAY IN EACH PIN --- */}
+          {/* =========================================================================
+              SECTION: GOLD YIELD PER DAY IN EACH PIN (Leaderboard & Cards)
+              ========================================================================= */}
           <div className="bg-white rounded-2xl border border-amber-200/90 shadow-xs overflow-hidden">
-            {/* Header */}
-            <div className="p-4 sm:p-5 bg-gradient-to-r from-amber-500/10 via-amber-50/50 to-transparent border-b border-amber-100/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            {/* Header with Title, Live Badge, and Yield Controls */}
+            <div className="p-4 sm:p-5 bg-gradient-to-r from-amber-500/10 via-amber-50/40 to-transparent border-b border-amber-200/70 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-amber-600 text-white flex items-center justify-center shadow-xs shrink-0">
                   <Coins className="w-5 h-5 text-amber-50" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-1.5">
-                      <span>Gold Yield Per Day</span>
+                    <h3 className="text-base font-bold text-slate-900 tracking-tight">
+                      Gold Yield Per Day in Each Pin
                     </h3>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-200/80">
-                      Live Output
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500 text-white shadow-2xs">
+                      Live Rate
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Daily gold yield rate calculated for each landmark pin based on bot coin logs.
+                    Calculated daily gold accumulation per landmark pin from bot harvest logs.
                   </p>
                 </div>
               </div>
 
-              {/* Stats pill & View Filters */}
+              {/* Live Yield Summary Pill & Filter Controls */}
               <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-                <div className="px-3 py-1.5 rounded-xl bg-amber-50 border border-amber-200/80 flex items-center gap-2 shrink-0">
+                <div className="px-3.5 py-1.5 rounded-xl bg-white border border-amber-200/90 shadow-2xs flex items-center gap-2 shrink-0">
                   <span className="text-[11px] font-medium text-amber-800">Total Projection:</span>
-                  <span className="text-sm font-bold font-mono text-amber-700 flex items-center gap-1">
-                    <Coins className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  <span className="text-sm font-extrabold font-mono text-amber-600 flex items-center gap-1 tabular-nums">
+                    <Coins className="w-4 h-4 text-amber-500 shrink-0" />
                     +{totalDailyCoinsYield.toLocaleString()}{' '}
-                    <span className="text-[11px] font-normal text-amber-600/80">/day</span>
+                    <span className="text-[11px] font-normal text-slate-400">/day</span>
                   </span>
                 </div>
 
                 {/* Filter toggle: All Pins vs Producing Only */}
-                <div className="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-50 text-xs">
+                <div className="inline-flex rounded-xl border border-slate-200 p-0.5 bg-slate-50 text-xs">
                   <button
                     type="button"
                     onClick={() => setGoldYieldFilter('all')}
-                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                       goldYieldFilter === 'all'
-                        ? 'bg-white text-slate-900 font-semibold shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
+                        ? 'bg-white text-slate-900 shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-900'
                     }`}
                   >
-                    All Pins ({pins.length})
+                    All ({pins.length})
                   </button>
                   <button
                     type="button"
                     onClick={() => setGoldYieldFilter('active')}
-                    className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                    className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                       goldYieldFilter === 'active'
-                        ? 'bg-white text-amber-800 font-semibold shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
+                        ? 'bg-amber-500 text-white shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-900'
                     }`}
                   >
                     Yielding ({pinsWithYieldCount})
@@ -509,19 +704,42 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
             </div>
 
-            {/* Pins Gold Yield Content */}
+            {/* Content: Cards or Empty States */}
             {pins.length === 0 ? (
-              <div className="p-8 text-center text-slate-400">
-                <MapPin className="w-8 h-8 mx-auto mb-2 text-slate-300" />
-                <p className="text-xs">No pins created yet. Add pins on the map to start tracking gold yield.</p>
+              <div className="p-12 text-center text-slate-400">
+                <MapPin className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+                <p className="text-sm font-semibold text-slate-700">No landmark pins registered yet</p>
+                <p className="text-xs text-slate-400 mt-1">
+                  Place pins on the map to start tracking gold accumulation rates.
+                </p>
+                <button
+                  type="button"
+                  onClick={onSwitchToMap}
+                  title="Open Map to Drop Pins"
+                  aria-label="Open Map to Drop Pins"
+                  className="mt-4 p-2 text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer inline-flex items-center justify-center shadow-xs"
+                >
+                  <MapIcon className="w-4 h-4" />
+                </button>
               </div>
             ) : pinsYieldList.length === 0 ? (
-              <div className="p-8 text-center text-slate-500">
-                <Coins className="w-8 h-8 mx-auto mb-2 text-amber-400" />
-                <p className="text-xs font-semibold text-slate-700">No active gold yield logged yet</p>
-                <p className="text-[11px] text-slate-400 mt-1 max-w-sm mx-auto">
-                  Assign bots to your pins in the Bots tab and log coins to see daily gold generation rates here.
+              <div className="p-10 text-center text-slate-500">
+                <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-500 flex items-center justify-center mx-auto mb-3">
+                  <Coins className="w-6 h-6" />
+                </div>
+                <p className="text-sm font-bold text-slate-800">No active gold logged yet</p>
+                <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+                  Assign bots to your landmark pins in the Bots tab and log coins to see live daily gold generation here.
                 </p>
+                <button
+                  type="button"
+                  onClick={() => setActiveDashboardTab('bots')}
+                  title="Switch to Bots Tab"
+                  aria-label="Switch to Bots Tab"
+                  className="mt-4 p-2 text-white bg-amber-600 hover:bg-amber-700 rounded-xl transition-colors cursor-pointer inline-flex items-center justify-center shadow-xs"
+                >
+                  <Bot className="w-4 h-4" />
+                </button>
               </div>
             ) : (
               <div className="p-4 sm:p-5">
@@ -535,119 +753,161 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     };
                     const assignedBots = assignedBotsByPinId[pin.id] || [];
                     const pinMapMeta = mapsList.find((m) => m.id === pin.mapId);
-                    const yieldRatio = maxPinYield > 0 ? Math.min(100, Math.round((stats.coinsPerDay / maxPinYield) * 100)) : 0;
+                    const yieldRatio =
+                      maxPinYield > 0
+                        ? Math.min(100, Math.round((stats.coinsPerDay / maxPinYield) * 100))
+                        : 0;
+
+                    const isTopThree = stats.coinsPerDay > 0 && idx < 3;
 
                     return (
                       <div
                         key={pin.id}
-                        className={`rounded-xl border p-3.5 flex flex-col justify-between transition-all ${
+                        className={`rounded-2xl border p-4 flex flex-col justify-between transition-all duration-200 ${
                           stats.coinsPerDay > 0
-                            ? 'bg-white border-amber-200/90 hover:border-amber-400 hover:shadow-xs'
+                            ? 'bg-white border-amber-200/90 hover:border-amber-400 hover:shadow-md'
                             : 'bg-slate-50/60 border-slate-200/80 hover:bg-white hover:border-slate-300'
                         }`}
                       >
                         <div>
-                          {/* Card Top: Rank/Icon, Pin Name, Category, Locate Button */}
+                          {/* Card Top: Pin Avatar, Name, Category & Action Buttons */}
                           <div className="flex items-start justify-between gap-2">
-                            <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="flex items-center gap-3 min-w-0">
                               <div
-                                className="w-8 h-8 rounded-lg flex items-center justify-center text-white shrink-0 shadow-2xs relative"
+                                className="w-9 h-9 rounded-xl flex items-center justify-center text-white shrink-0 shadow-2xs relative"
                                 style={{ backgroundColor: pin.color }}
                               >
                                 <PinIcon name={pin.icon} className="w-4 h-4 stroke-[2.5]" />
-                                {stats.coinsPerDay > 0 && idx < 3 && (
-                                  <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-amber-400 text-amber-950 text-[9px] font-black flex items-center justify-center border border-white">
+                                {isTopThree && (
+                                  <span
+                                    className={`absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-[9px] font-black flex items-center justify-center border-2 border-white shadow-2xs ${
+                                      idx === 0
+                                        ? 'bg-amber-400 text-amber-950'
+                                        : idx === 1
+                                        ? 'bg-slate-300 text-slate-800'
+                                        : 'bg-amber-700 text-white'
+                                    }`}
+                                  >
                                     {idx + 1}
                                   </span>
                                 )}
                               </div>
                               <div className="min-w-0">
-                                <h4 className="font-bold text-slate-900 text-xs sm:text-sm truncate" title={pin.name}>
+                                <h4
+                                  className="font-bold text-slate-900 text-sm truncate"
+                                  title={pin.name}
+                                >
                                   {pin.name}
                                 </h4>
                                 <div className="flex items-center gap-1.5 text-[11px] text-slate-400 mt-0.5 truncate">
-                                  <span className="truncate">{pinMapMeta?.name || 'Map'}</span>
+                                  <span className="truncate text-slate-500 font-medium">
+                                    {pinMapMeta?.name || 'Map'}
+                                  </span>
                                   <span>•</span>
-                                  <span className="truncate text-slate-600 font-medium">{pin.categoryName || 'General'}</span>
+                                  <span className="truncate text-slate-600 font-medium">
+                                    {pin.categoryName || 'General'}
+                                  </span>
                                 </div>
                               </div>
                             </div>
 
-                            {/* Locate on Map button (Icon Only) */}
-                            <button
-                              type="button"
-                              onClick={() => onLocatePinOnMap(pin)}
-                              title="Locate Pin on Map"
-                              aria-label="Locate Pin on Map"
-                              className="p-1.5 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-colors cursor-pointer shrink-0"
-                            >
-                              <Crosshair className="w-4 h-4" />
-                            </button>
+                            {/* Card Top Action Buttons (Icon Only) */}
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => onLocatePinOnMap(pin)}
+                                title="Locate Pin on Map"
+                                aria-label="Locate Pin on Map"
+                                className="p-1.5 text-slate-400 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <Crosshair className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onEditPin(pin)}
+                                title="Edit Pin"
+                                aria-label="Edit Pin"
+                                className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                            </div>
                           </div>
 
                           {/* Primary Metric: Gold Yield Per Day */}
-                          <div className="mt-3 p-2.5 rounded-lg bg-amber-50/70 border border-amber-200/60 flex items-center justify-between">
-                            <span className="text-[11px] font-semibold text-amber-900 flex items-center gap-1">
-                              <Coins className="w-3.5 h-3.5 text-amber-500" />
-                              Daily Yield:
-                            </span>
-                            <span className="text-sm font-bold font-mono text-amber-700 tabular-nums">
-                              {stats.coinsPerDay > 0 ? `+${stats.coinsPerDay.toLocaleString()} gold/day` : '0 gold/day'}
-                            </span>
+                          <div className="mt-3.5 p-3 rounded-xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-200/80">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-bold text-amber-900 flex items-center gap-1.5">
+                                <Coins className="w-4 h-4 text-amber-500 shrink-0" />
+                                Daily Yield
+                              </span>
+                              <span className="text-base font-extrabold font-mono text-amber-600 tabular-nums">
+                                {stats.coinsPerDay > 0
+                                  ? `+${stats.coinsPerDay.toLocaleString()} gold / day`
+                                  : '0 gold / day'}
+                              </span>
+                            </div>
+
+                            {/* Micro progress bar relative to top yield */}
+                            {maxPinYield > 0 && stats.coinsPerDay > 0 && (
+                              <div className="mt-2 w-full bg-amber-100/60 rounded-full h-1.5 overflow-hidden">
+                                <div
+                                  className="bg-gradient-to-r from-amber-400 to-amber-600 h-1.5 rounded-full transition-all duration-300"
+                                  style={{ width: `${Math.max(6, yieldRatio)}%` }}
+                                />
+                              </div>
+                            )}
                           </div>
 
-                          {/* Yield Progress Bar relative to highest pin */}
-                          {maxPinYield > 0 && stats.coinsPerDay > 0 && (
-                            <div className="mt-2 w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
-                              <div
-                                className="bg-gradient-to-r from-amber-400 to-amber-500 h-1.5 rounded-full transition-all duration-300"
-                                style={{ width: `${Math.max(8, yieldRatio)}%` }}
-                              />
-                            </div>
-                          )}
-
-                          {/* Sub-metrics: Today & Total */}
-                          <div className="grid grid-cols-2 gap-2 mt-2.5 text-[11px] text-slate-500">
-                            <div className="bg-slate-50 px-2 py-1 rounded border border-slate-100 font-mono">
-                              <span className="text-slate-400 text-[10px] block">Today</span>
-                              <span className="font-semibold text-slate-800">
+                          {/* 2-Column Sub Metrics: Today & Lifetime Total */}
+                          <div className="grid grid-cols-2 gap-2 mt-2.5 text-[11px]">
+                            <div className="bg-slate-50/80 px-2.5 py-1.5 rounded-lg border border-slate-100 font-mono">
+                              <span className="text-slate-400 text-[10px] block">Today's Harvest</span>
+                              <span className="font-bold text-slate-800">
                                 {stats.todayCoins.toLocaleString()} gold
                               </span>
                             </div>
-                            <div className="bg-slate-50 px-2 py-1 rounded border border-slate-100 font-mono">
+                            <div className="bg-slate-50/80 px-2.5 py-1.5 rounded-lg border border-slate-100 font-mono">
                               <span className="text-slate-400 text-[10px] block">All-Time Total</span>
-                              <span className="font-semibold text-slate-800">
+                              <span className="font-bold text-slate-800">
                                 {stats.totalCoins.toLocaleString()} gold
                               </span>
                             </div>
                           </div>
                         </div>
 
-                        {/* Footer: Assigned Bots */}
-                        <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between gap-1 text-[11px]">
-                          <div className="flex items-center gap-1 text-slate-500 min-w-0">
+                        {/* Card Footer: Assigned Bots (No hashtags, avatar bot numbers) */}
+                        <div className="mt-3.5 pt-2.5 border-t border-slate-100 flex items-center justify-between gap-1 text-[11px]">
+                          <div className="flex items-center gap-1.5 text-slate-500 min-w-0">
                             <Bot className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <span className="text-slate-400">Bots:</span>
+                            <span className="text-slate-400 text-[10px]">Bots:</span>
                             {assignedBots.length === 0 ? (
-                              <span className="italic text-slate-400 text-[10px]">None assigned</span>
+                              <span className="italic text-slate-400 text-[10px]">Unassigned</span>
                             ) : (
                               <div className="flex items-center gap-1 overflow-hidden truncate">
-                                {assignedBots.slice(0, 2).map((b) => (
+                                {assignedBots.slice(0, 3).map((b) => (
                                   <span
                                     key={b.id}
-                                    className={`px-1.5 py-0.2 rounded text-[10px] font-mono font-medium truncate ${
+                                    className={`px-1.5 py-0.2 rounded text-[10px] font-mono font-bold truncate flex items-center gap-1 ${
                                       b.status === 'banned'
                                         ? 'bg-rose-50 text-rose-700 border border-rose-200'
                                         : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                                     }`}
-                                    title={`${b.name} (${b.status || 'working'})`}
+                                    title={`${b.name} (${b.status || 'working'})${
+                                      b.banLiftDate ? ` - lifts ${b.banLiftDate}` : ''
+                                    }`}
                                   >
+                                    <span
+                                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                        b.status === 'banned' ? 'bg-rose-500' : 'bg-emerald-500'
+                                      }`}
+                                    />
                                     {b.botNumber ? b.botNumber : b.name}
                                   </span>
                                 ))}
-                                {assignedBots.length > 2 && (
+                                {assignedBots.length > 3 && (
                                   <span className="text-[10px] text-slate-400 font-mono font-semibold">
-                                    +{assignedBots.length - 2}
+                                    +{assignedBots.length - 3}
                                   </span>
                                 )}
                               </div>
@@ -666,27 +926,40 @@ export const Dashboard: React.FC<DashboardProps> = ({
             )}
           </div>
 
-          {/* Search & Filter Header */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-            {/* Search */}
+          {/* =========================================================================
+              SEARCH & FILTER TOOLBAR FOR LANDMARKS TABLE
+              ========================================================================= */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200/90 shadow-xs">
+            {/* Search Input with Clear Button */}
             <div className="relative flex-1 max-w-md">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Filter pins by name, category, or notes..."
-                className="w-full pl-9 pr-4 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-sky-500"
+                placeholder="Search pins by name, category, or notes..."
+                className="w-full pl-9 pr-8 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white transition-all font-medium text-slate-800 placeholder-slate-400"
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  title="Clear search query"
+                  aria-label="Clear search query"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-600 rounded transition-colors cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
 
-            {/* Map Filter & Category Filter & Sorting */}
+            {/* Filters & Sorting Tools */}
             <div className="flex flex-wrap items-center gap-2">
               {/* Map Filter */}
               <select
                 value={selectedMapFilter}
                 onChange={(e) => setSelectedMapFilter(e.target.value)}
-                className="px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                className="px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium text-slate-700 cursor-pointer shadow-2xs"
               >
                 <option value="all">All Maps ({pins.length} pins)</option>
                 {mapsList.map((m) => {
@@ -704,7 +977,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <select
                   value={selectedCategoryFilter}
                   onChange={(e) => setSelectedCategoryFilter(e.target.value)}
-                  className="px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  className="px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium text-slate-700 cursor-pointer shadow-2xs"
                 >
                   <option value="all">All Categories</option>
                   {categories.map((cat) => (
@@ -715,6 +988,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </select>
               )}
 
+              {/* Sort Field Selector */}
               <select
                 value={sortField}
                 onChange={(e) => {
@@ -723,20 +997,21 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   if (val === 'name') setSortAsc(true);
                   if (val === 'coins') setSortAsc(false);
                 }}
-                className="px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 font-medium text-slate-700 cursor-pointer shadow-2xs"
+                className="px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 font-semibold text-slate-700 cursor-pointer shadow-2xs"
               >
                 <option value="date">Sort: Date Created</option>
                 <option value="name">Sort: Name (A-Z / 0-9)</option>
-                <option value="coins">Sort: Gold Yield / Day</option>
+                <option value="coins">Sort: Daily Gold Yield</option>
                 <option value="x">Sort: X Coordinate</option>
                 <option value="y">Sort: Y Coordinate</option>
               </select>
 
+              {/* Sort Order Toggle Button (Icon Only) */}
               <button
                 type="button"
                 onClick={() => setSortAsc(!sortAsc)}
-                className="p-2 text-xs bg-white border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer flex items-center justify-center shadow-2xs"
-                title={sortAsc ? 'Ascending (A-Z, 0-9) - click to reverse' : 'Descending (Z-A, 9-0) - click to reverse'}
+                className="p-2 bg-slate-50 border border-slate-200 rounded-xl hover:bg-slate-100 text-slate-600 hover:text-slate-900 transition-colors cursor-pointer flex items-center justify-center shadow-2xs"
+                title={sortAsc ? 'Sort Order: Ascending (Click to reverse)' : 'Sort Order: Descending (Click to reverse)'}
                 aria-label={sortAsc ? 'Sort Ascending' : 'Sort Descending'}
               >
                 {sortAsc ? <ArrowUpAZ className="w-4 h-4 text-sky-600" /> : <ArrowDownZA className="w-4 h-4 text-sky-600" />}
@@ -744,39 +1019,42 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
           </div>
 
-          {/* Pins Table / Grid (Actions use icon only per user instruction) */}
+          {/* =========================================================================
+              LANDMARK PINS TABLE (Action buttons: ICON ONLY)
+              ========================================================================= */}
           {filteredPins.length === 0 ? (
-            <div className="text-center py-16 bg-white rounded-2xl border border-slate-200 p-8 shadow-xs">
+            <div className="text-center py-16 bg-white rounded-2xl border border-slate-200/90 p-8 shadow-xs">
               <div className="w-12 h-12 rounded-2xl bg-sky-50 text-sky-600 flex items-center justify-center mx-auto mb-3">
                 <MapPin className="w-6 h-6" />
               </div>
-              <h3 className="text-base font-semibold text-slate-900 mb-1">No landmark pins found</h3>
+              <h3 className="text-base font-bold text-slate-900 mb-1">No landmark pins found</h3>
               <p className="text-xs text-slate-500 max-w-sm mx-auto mb-4">
                 {searchQuery || selectedCategoryFilter !== 'all' || selectedMapFilter !== 'all'
-                  ? 'No pins matched your current filter criteria.'
-                  : 'You have not placed any pins yet. Go to the Map view to plot key landmarks!'}
+                  ? 'No pins match your current filter search. Try resetting your filters.'
+                  : 'You have not added any pins yet. Go to the interactive map to plot landmark points.'}
               </p>
               <button
+                type="button"
                 onClick={onSwitchToMap}
                 title="Go to Map Plotter"
                 aria-label="Go to Map Plotter"
-                className="p-2.5 text-white bg-sky-600 hover:bg-sky-700 rounded-lg transition-colors shadow-xs cursor-pointer inline-flex items-center justify-center"
+                className="p-2.5 text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors shadow-xs cursor-pointer inline-flex items-center justify-center"
               >
                 <MapIcon className="w-4 h-4" />
               </button>
             </div>
           ) : (
-            <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
-                    <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-500 uppercase font-semibold text-[10px] tracking-wider">
+                    <tr className="bg-slate-50/90 border-b border-slate-200 text-slate-500 uppercase font-bold text-[10px] tracking-wider">
                       <th className="py-3 px-4">Pin Name</th>
                       <th className="py-3 px-3">Map</th>
                       <th className="py-3 px-3">Category</th>
                       <th className="py-3 px-3">Exact Pixels (X, Y)</th>
                       <th className="py-3 px-3">Percent (%)</th>
-                      <th className="py-3 px-3">Gold Yield / Day</th>
+                      <th className="py-3 px-3">Daily Gold Yield</th>
                       <th className="py-3 px-3">Description</th>
                       <th className="py-3 px-3">Created</th>
                       <th className="py-3 px-4 text-right">Actions</th>
@@ -785,10 +1063,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <tbody className="divide-y divide-slate-100">
                     {filteredPins.map((pin) => {
                       const pinMapMeta = mapsList.find((m) => m.id === pin.mapId);
-                      const mapDisplayName = pinMapMeta?.name || 'Wingfril Beach';
+                      const mapDisplayName = pinMapMeta?.name || 'Wingfril Island';
+                      const isCopied = copiedCoordPinId === pin.id;
 
                       return (
-                        <tr key={pin.id} className="hover:bg-slate-50/60 transition-colors">
+                        <tr key={pin.id} className="hover:bg-slate-50/70 transition-colors group">
+                          {/* Pin Name + Icon */}
                           <td className="py-3 px-4">
                             <div className="flex items-center gap-2.5">
                               <div
@@ -797,38 +1077,55 @@ export const Dashboard: React.FC<DashboardProps> = ({
                               >
                                 <PinIcon name={pin.icon} className="w-3.5 h-3.5 stroke-[2.5]" />
                               </div>
-                              <div>
-                                <span className="font-semibold text-slate-900 block">{pin.name}</span>
-                              </div>
+                              <span className="font-bold text-slate-900 block truncate max-w-[160px]" title={pin.name}>
+                                {pin.name}
+                              </span>
                             </div>
                           </td>
 
+                          {/* Map Name */}
                           <td className="py-3 px-3">
-                            <span className="text-slate-600 font-medium truncate max-w-[130px] block">
+                            <span className="text-slate-600 font-medium truncate max-w-[130px] block" title={mapDisplayName}>
                               {mapDisplayName}
                             </span>
                           </td>
 
+                          {/* Category Tag */}
                           <td className="py-3 px-3">
                             <div className="flex items-center gap-1.5">
                               <span
                                 className="w-2 h-2 rounded-full shrink-0"
                                 style={{ backgroundColor: pin.color }}
                               />
-                              <span className="text-slate-700 truncate max-w-[120px]">
+                              <span className="text-slate-700 font-medium truncate max-w-[120px]">
                                 {pin.categoryName || 'General'}
                               </span>
                             </div>
                           </td>
 
+                          {/* Exact Pixel Coordinates with Quick Copy */}
                           <td className="py-3 px-3 font-mono font-medium text-slate-800 tabular-nums">
-                            {pin.pixelX}, {pin.pixelY}
+                            <button
+                              type="button"
+                              onClick={() => handleCopyCoords(pin)}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-slate-100 text-slate-800 hover:text-sky-600 transition-colors cursor-pointer"
+                              title="Click to copy coordinates"
+                            >
+                              <span>{pin.pixelX}, {pin.pixelY}</span>
+                              {isCopied ? (
+                                <CheckCheck className="w-3 h-3 text-emerald-600" />
+                              ) : (
+                                <Copy className="w-3 h-3 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" />
+                              )}
+                            </button>
                           </td>
 
-                          <td className="py-3 px-3 font-mono text-slate-600 tabular-nums">
+                          {/* Percent Coordinates */}
+                          <td className="py-3 px-3 font-mono text-slate-500 tabular-nums">
                             {pin.xPercent.toFixed(1)}%, {pin.yPercent.toFixed(1)}%
                           </td>
 
+                          {/* Daily Gold Yield */}
                           <td className="py-3 px-3 whitespace-nowrap">
                             {(() => {
                               const stat = pinDailyStatsMap[pin.id];
@@ -841,49 +1138,55 @@ export const Dashboard: React.FC<DashboardProps> = ({
                               }
                               return (
                                 <div className="flex flex-col">
-                                  <span className="font-semibold text-amber-600 font-mono flex items-center gap-1 text-xs">
+                                  <span className="font-bold text-amber-600 font-mono flex items-center gap-1 text-xs">
                                     <Coins className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                                    +{stat.coinsPerDay.toLocaleString()} gold / day
+                                    +{stat.coinsPerDay.toLocaleString()} / day
                                   </span>
                                   <span className="text-[10px] text-slate-400 font-mono">
-                                    Total: {stat.totalCoins.toLocaleString()} • Today: {stat.todayCoins.toLocaleString()}
+                                    Total: {stat.totalCoins.toLocaleString()} gold
                                   </span>
                                 </div>
                               );
                             })()}
                           </td>
 
+                          {/* Description */}
                           <td className="py-3 px-3 text-slate-500 max-w-xs truncate">
                             {pin.description || <span className="text-slate-300 italic">—</span>}
                           </td>
 
+                          {/* Created Date */}
                           <td className="py-3 px-3 text-slate-400 font-mono text-[11px] whitespace-nowrap">
                             {new Date(pin.createdAt).toLocaleDateString()}
                           </td>
 
+                          {/* Row Actions (ICON ONLY per user instruction) */}
                           <td className="py-3 px-4 text-right whitespace-nowrap">
                             <div className="flex items-center justify-end gap-1">
                               <button
+                                type="button"
                                 onClick={() => onLocatePinOnMap(pin)}
-                                className="p-1.5 text-slate-600 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-colors cursor-pointer"
+                                className="p-1.5 text-slate-500 hover:text-sky-600 hover:bg-sky-50 rounded-lg transition-colors cursor-pointer"
                                 title="Locate on Map"
                                 aria-label="Locate on Map"
                               >
                                 <Crosshair className="w-3.5 h-3.5" />
                               </button>
                               <button
+                                type="button"
                                 onClick={() => onEditPin(pin)}
-                                className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                                title="Edit Pin"
-                                aria-label="Edit Pin"
+                                className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                                title="Edit Pin Details"
+                                aria-label="Edit Pin Details"
                               >
                                 <Edit2 className="w-3.5 h-3.5" />
                               </button>
                               <button
+                                type="button"
                                 onClick={() => setPinToDelete(pin)}
-                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                                title="Delete Pin"
-                                aria-label="Delete Pin"
+                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                title="Delete Landmark Pin"
+                                aria-label="Delete Landmark Pin"
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -900,7 +1203,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
 
-      {/* --- TAB 2: BOTS (Person management, coin logging with 12-hr PH time, history, pin changes) --- */}
+      {/* --- TAB 2: BOTS TAB --- */}
       {activeDashboardTab === 'bots' && (
         <BotsTab
           persons={persons}
@@ -913,10 +1216,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
         />
       )}
 
-      {/* --- TAB 3: BUDGET (Under Construction) --- */}
+      {/* --- TAB 3: BUDGET TAB --- */}
       {activeDashboardTab === 'budget' && <BudgetTab />}
 
-      {/* --- CONFIRMATION MODAL: Delete Landmark Pin --- */}
+      {/* =========================================================================
+          CONFIRMATION MODAL: Delete Landmark Pin (Buttons: ICON ONLY)
+          ========================================================================= */}
       {pinToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
           <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm overflow-hidden p-5 animate-in zoom-in-95 duration-150">
@@ -938,7 +1243,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 onClick={() => setPinToDelete(null)}
                 title="Cancel"
                 aria-label="Cancel"
-                className="p-2 text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                className="p-2 text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -950,7 +1255,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 }}
                 title="Confirm Delete"
                 aria-label="Confirm Delete"
-                className="p-2 text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-xs cursor-pointer"
+                className="p-2 text-white bg-red-600 hover:bg-red-700 rounded-xl transition-colors shadow-xs cursor-pointer"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -959,7 +1264,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         </div>
       )}
 
-      {/* --- CONFIRMATION MODAL: Delete Category --- */}
+      {/* =========================================================================
+          CONFIRMATION MODAL: Delete Category (Buttons: ICON ONLY)
+          ========================================================================= */}
       {categoryToDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
           <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm overflow-hidden p-5 animate-in zoom-in-95 duration-150">
@@ -981,7 +1288,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 onClick={() => setCategoryToDelete(null)}
                 title="Cancel"
                 aria-label="Cancel"
-                className="p-2 text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                className="p-2 text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -993,9 +1300,114 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 }}
                 title="Confirm Delete"
                 aria-label="Confirm Delete"
-                className="p-2 text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-xs cursor-pointer"
+                className="p-2 text-white bg-red-600 hover:bg-red-700 rounded-xl transition-colors shadow-xs cursor-pointer"
               >
                 <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODAL: Android APK & PWA Mobile App Installation
+          ========================================================================= */}
+      {isApkModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 w-full max-w-md overflow-hidden p-6 animate-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-sky-500 to-indigo-600 text-white flex items-center justify-center shadow-xs shrink-0">
+                  <Smartphone className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Android APK & Mobile App</h3>
+                  <p className="text-xs text-slate-500">Native standalone installation</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsApkModalOpen(false)}
+                title="Close"
+                aria-label="Close"
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="py-4 space-y-4">
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-100 flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                  <Check className="w-4 h-4 stroke-[3]" />
+                </div>
+                <div className="text-xs text-slate-600 space-y-1">
+                  <p className="font-bold text-slate-900">WebAPK Ready</p>
+                  <p>
+                    This app includes full Web App Manifest, auto-updating service workers, and high-res maskable Android icons for native WebAPK generation.
+                  </p>
+                </div>
+              </div>
+
+              {isInstalled ? (
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center gap-2">
+                  <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>App is already running as an installed standalone app!</span>
+                </div>
+              ) : isInstallable ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-slate-500">
+                    Click the install button below to generate and install the native Android WebAPK on your device:
+                  </p>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await install();
+                        setIsApkModalOpen(false);
+                      }}
+                      title="Install Native App / APK"
+                      aria-label="Install Native App / APK"
+                      className="p-3 text-white bg-sky-600 hover:bg-sky-700 rounded-xl transition-colors shadow-xs cursor-pointer flex items-center justify-center gap-2 w-full font-semibold text-xs"
+                    >
+                      <Download className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ) : isIOS ? (
+                <div className="p-3.5 rounded-2xl bg-indigo-50/70 border border-indigo-100 text-xs text-slate-700 space-y-1.5">
+                  <p className="font-bold text-indigo-950">Install on iPhone / iPad:</p>
+                  <p>1. Tap the <strong>Share</strong> icon in Safari toolbar.</p>
+                  <p>2. Select <strong>Add to Home Screen</strong>.</p>
+                </div>
+              ) : (
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 text-xs text-slate-600 space-y-2">
+                  <p className="font-bold text-slate-900">How to Install on Android:</p>
+                  <p>
+                    1. Open this app in Chrome on your Android device.
+                  </p>
+                  <p>
+                    2. Tap the browser menu (⋮) and select <strong>Install app</strong> or <strong>Add to Home screen</strong>.
+                  </p>
+                  <p>
+                    3. Android will automatically package and install the app as an APK on your home screen.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer (ICON ONLY per user instruction) */}
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => setIsApkModalOpen(false)}
+                title="Close"
+                aria-label="Close"
+                className="p-2 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
               </button>
             </div>
           </div>
