@@ -108,10 +108,11 @@ export const MapManagerModal: React.FC<MapManagerModalProps> = ({
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition-colors flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
+                  title={selectedFile ? 'Change Map File' : 'Select Map Image File'}
+                  aria-label={selectedFile ? 'Change Map File' : 'Select Map Image File'}
+                  className="p-2 text-slate-700 bg-white border border-slate-300 hover:bg-slate-100 rounded-lg transition-colors flex items-center justify-center shrink-0 cursor-pointer"
                 >
-                  <Upload className="w-3.5 h-3.5 text-slate-500" />
-                  <span>{selectedFile ? 'Change File' : 'Select Image File'}</span>
+                  <Upload className="w-4 h-4 text-slate-500" />
                 </button>
 
                 <input
@@ -125,9 +126,11 @@ export const MapManagerModal: React.FC<MapManagerModalProps> = ({
                 <button
                   type="submit"
                   disabled={!selectedFile || isUploadingMap}
-                  className="px-4 py-2 text-xs font-medium text-white bg-sky-600 hover:bg-sky-700 disabled:opacity-50 rounded-lg transition-colors shadow-xs shrink-0 flex items-center justify-center gap-1 cursor-pointer"
+                  title={isUploadingMap ? 'Saving to DB...' : 'Save & Open Map'}
+                  aria-label={isUploadingMap ? 'Saving to DB...' : 'Save & Open Map'}
+                  className="p-2 text-white bg-sky-600 hover:bg-sky-700 disabled:opacity-50 rounded-lg transition-colors shadow-xs shrink-0 flex items-center justify-center cursor-pointer"
                 >
-                  {isUploadingMap ? 'Saving to DB...' : 'Save & Open'}
+                  <Check className="w-4 h-4" />
                 </button>
               </div>
 
@@ -196,18 +199,20 @@ export const MapManagerModal: React.FC<MapManagerModalProps> = ({
                       <div className="flex items-center gap-1.5 shrink-0 ml-3">
                         {!isActive ? (
                           <button
+                            type="button"
                             onClick={() => {
                               onSelectMap(map.id);
                               onClose();
                             }}
-                            className="px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                            title={`Switch to ${map.name}`}
+                            aria-label={`Switch to ${map.name}`}
+                            className="p-2 text-slate-700 hover:text-sky-600 bg-slate-100 hover:bg-sky-50 rounded-lg transition-colors cursor-pointer flex items-center justify-center"
                           >
-                            Switch to Map
+                            <Check className="w-4 h-4" />
                           </button>
                         ) : (
-                          <span className="flex items-center gap-1 text-xs font-semibold text-sky-700 px-2 py-1">
+                          <span className="flex items-center gap-1 text-xs font-semibold text-sky-700 px-2 py-1" title="Currently Active Map">
                             <Check className="w-3.5 h-3.5 stroke-[3]" />
-                            <span>Active</span>
                           </span>
                         )}
 
@@ -218,8 +223,9 @@ export const MapManagerModal: React.FC<MapManagerModalProps> = ({
                                 onDeleteMap(map.id);
                               }
                             }}
-                            className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer flex items-center justify-center"
                             title="Delete Map"
+                            aria-label="Delete Map"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
@@ -236,10 +242,13 @@ export const MapManagerModal: React.FC<MapManagerModalProps> = ({
         {/* Footer */}
         <div className="px-5 py-3 border-t border-slate-100 flex justify-end">
           <button
+            type="button"
             onClick={onClose}
-            className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+            title="Close"
+            aria-label="Close"
+            className="p-2 text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
           >
-            Close
+            <X className="w-4 h-4" />
           </button>
         </div>
       </div>

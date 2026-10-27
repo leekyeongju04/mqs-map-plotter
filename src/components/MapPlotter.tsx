@@ -559,16 +559,17 @@ export const MapPlotter: React.FC<MapPlotterProps> = ({
           <div className="absolute bottom-4 right-4 z-20 flex flex-col items-end gap-2">
             {/* Drop Pin Mode Trigger */}
             <button
+              type="button"
               onClick={() => setIsDropPinMode(!isDropPinMode)}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold shadow-lg transition-all cursor-pointer ${
+              className={`p-2.5 rounded-xl text-xs font-semibold shadow-lg transition-all cursor-pointer flex items-center justify-center ${
                 isDropPinMode
                   ? 'bg-sky-600 text-white ring-4 ring-sky-400/30 animate-pulse'
                   : 'bg-white text-slate-800 hover:bg-slate-50 border border-slate-200'
               }`}
-              title="Click on the map to place a new landmark pin"
+              title={isDropPinMode ? 'Click Map to Place Pin (Click to Cancel)' : 'Drop Pin on Map'}
+              aria-label={isDropPinMode ? 'Click Map to Place Pin (Click to Cancel)' : 'Drop Pin on Map'}
             >
               <Crosshair className="w-4 h-4" />
-              <span>{isDropPinMode ? 'Click Map to Place Pin' : 'Drop Pin'}</span>
             </button>
 
             {/* Zoom Controls HUD */}

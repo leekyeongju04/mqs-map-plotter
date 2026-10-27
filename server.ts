@@ -1,9 +1,11 @@
+import http from 'http';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 
 const app = express();
 const port = 3000;
+const httpServer = http.createServer(app);
 
 // Allow payloads up to 25MB for base64 images
 app.use(express.json({ limit: '25mb' }));
@@ -85,7 +87,10 @@ Do not wrap in markdown or add explanations.`,
 async function start() {
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: false,
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -96,7 +101,7 @@ async function start() {
     });
   }
 
-  app.listen(port, '0.0.0.0', () => {
+  httpServer.listen(port, '0.0.0.0', () => {
     console.log(`Server running on port ${port}`);
   });
 }

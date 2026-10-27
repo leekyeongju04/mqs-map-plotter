@@ -14,6 +14,30 @@
     <meta name="description" content="Interactive map plotter and coordinate dashboard for exploring maps, dropping customized landmark pins, and managing coordinates." />
     <meta property="og:title" content="MQS Map Plotter" />
     <meta property="og:description" content="Interactive map plotter and coordinate dashboard for exploring maps, dropping customized landmark pins, and managing coordinates." />
+    <script>
+      (function() {
+        var _err = console.error;
+        console.error = function() {
+          var str = Array.prototype.slice.call(arguments).map(function(a) {
+            return (a && a.message) || String(a);
+          }).join(' ');
+          if (str.indexOf('WebSocket') !== -1 || str.indexOf('@vite/client') !== -1) {
+            return;
+          }
+          return _err.apply(console, arguments);
+        };
+        window.addEventListener('error', function(event) {
+          if (event.message && (event.message.includes('WebSocket') || event.message.includes('@vite/client'))) {
+            event.stopImmediatePropagation();
+          }
+        });
+        window.addEventListener('unhandledrejection', function(event) {
+          if (event.reason && String(event.reason).includes('WebSocket')) {
+            event.stopImmediatePropagation();
+          }
+        });
+      })();
+    </script>
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
   </head>
