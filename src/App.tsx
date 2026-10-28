@@ -307,8 +307,31 @@ export default function App() {
           }
         } else {
           initialSyncDone.current.persons = true;
-          setPersons(cloudPersons);
-          saveLocalPersons(cloudPersons);
+          const sanitizedCloud = cloudPersons.map((p) => {
+            const chrono = [...(p.logs || [])]
+              .map((l) => ({ l, t: new Date(l.timestamp).getTime() }))
+              .filter((x) => !isNaN(x.t))
+              .sort((a, b) => a.t - b.t);
+
+            let currentCoins = p.totalCoins || 0;
+            let hasCoinLogs = false;
+            for (const { l } of chrono) {
+              if (l.type === 'status_change' && l.note?.toLowerCase().includes('coins reset to 0')) {
+                currentCoins = 0;
+                continue;
+              }
+              if (l.type === 'coins' && typeof l.amount === 'number') {
+                hasCoinLogs = true;
+                currentCoins = l.amount;
+              }
+            }
+            return {
+              ...p,
+              totalCoins: hasCoinLogs ? currentCoins : (p.totalCoins || 0),
+            };
+          });
+          setPersons(sanitizedCloud);
+          saveLocalPersons(sanitizedCloud);
         }
       },
       (error) => {
@@ -783,10 +806,32 @@ export default function App() {
     const now = new Date();
     const assignedPin = pins.find((p) => p.id === currentPerson.assignedPinId);
 
+    // Walk logs from oldest to newest to find the active baseline (log 1) and most recent reading
+    const chronologicalLogs = [...(currentPerson.logs || [])]
+      .map((l) => ({ l, t: new Date(l.timestamp).getTime() }))
+      .filter((x) => !isNaN(x.t))
+      .sort((a, b) => a.t - b.t);
+
+    let baselineLog: CoinLogEntry | null = null;
+    let lastCoinLog: CoinLogEntry | null = null;
+
+    for (const { l } of chronologicalLogs) {
+      if (l.type === 'pin_change' || l.type === 'status_change') {
+        baselineLog = null;
+        lastCoinLog = null;
+        continue;
+      }
+      if (l.type === 'coins') {
+        if (!baselineLog) baselineLog = l;
+        lastCoinLog = l;
+      }
+    }
+
     const coinLog: CoinLogEntry = {
       id: `log-coins-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       type: 'coins',
       amount,
+      rawReading: amount,
       pinId: currentPerson.assignedPinId,
       pinName: assignedPin?.name || currentPerson.assignedPinName || 'Unassigned',
       timestamp: now.toISOString(),
@@ -795,7 +840,7 @@ export default function App() {
 
     const updatedPerson: PersonBot = {
       ...currentPerson,
-      totalCoins: (currentPerson.totalCoins || 0) + amount,
+      totalCoins: amount,
       updatedAt: now.toISOString(),
       logs: [coinLog, ...currentPerson.logs],
     };
@@ -813,17 +858,83 @@ export default function App() {
     }
   };
 
+  const handleResetCoins = async (personId: string) => {
+    const currentPerson = persons.find((p) => p.id === personId);
+    if (!currentPerson) return;
+
+    const now = new Date();
+    const resetLog: CoinLogEntry = {
+      id: `log-reset-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      type: 'status_change',
+      timestamp: now.toISOString(),
+      phTime: formatPHTime(now),
+      note: `Coins reset to 0 (Sold ${currentPerson.totalCoins.toLocaleString()} coins)`,
+    };
+
+    const updatedPerson: PersonBot = {
+      ...currentPerson,
+      totalCoins: 0,
+      updatedAt: now.toISOString(),
+      logs: [resetLog, ...currentPerson.logs],
+    };
+
+    const updatedList = persons.map((p) => (p.id === personId ? updatedPerson : p));
+    setPersons(updatedList);
+    saveLocalPersons(updatedList);
+
+    if (user) {
+      try {
+        await setDoc(doc(db, 'users', user.uid, 'persons', personId), sanitizeForFirestore(updatedPerson));
+      } catch (err) {
+        console.warn('Firestore reset coins error:', err);
+      }
+    }
+  };
+
   const handleDeleteLogEntry = async (personId: string, logId: string) => {
     const currentPerson = persons.find((p) => p.id === personId);
     if (!currentPerson) return;
 
-    const targetLog = currentPerson.logs.find((l) => l.id === logId);
-    const coinAdjustment = targetLog?.type === 'coins' ? targetLog.amount || 0 : 0;
+    const remainingLogs = currentPerson.logs.filter((l) => l.id !== logId);
+
+    // Recalculate totalCoins based on remaining logs
+    const chronological = [...remainingLogs]
+      .map((l) => ({ l, t: new Date(l.timestamp).getTime() }))
+      .filter((x) => !isNaN(x.t))
+      .sort((a, b) => a.t - b.t);
+
+    let baselineLog: CoinLogEntry | null = null;
+    let lastLog: CoinLogEntry | null = null;
+
+    for (const { l } of chronological) {
+      if (l.type === 'pin_change' || l.type === 'status_change') {
+        baselineLog = null;
+        lastLog = null;
+        continue;
+      }
+      if (l.type === 'coins') {
+        if (!baselineLog) baselineLog = l;
+        lastLog = l;
+      }
+    }
+
+    let recalculatedTotal = 0;
+    if (baselineLog && lastLog && baselineLog !== lastLog) {
+      const baseR =
+        typeof baselineLog.rawReading === 'number'
+          ? baselineLog.rawReading
+          : (baselineLog.amount || 0);
+      const lastR =
+        typeof lastLog.rawReading === 'number'
+          ? lastLog.rawReading
+          : (lastLog.amount || 0);
+      recalculatedTotal = Math.max(0, lastR - baseR);
+    }
 
     const updatedPerson: PersonBot = {
       ...currentPerson,
-      totalCoins: Math.max(0, currentPerson.totalCoins - coinAdjustment),
-      logs: currentPerson.logs.filter((l) => l.id !== logId),
+      totalCoins: recalculatedTotal,
+      logs: remainingLogs,
       updatedAt: new Date().toISOString(),
     };
 
@@ -903,6 +1014,7 @@ export default function App() {
             onDeletePerson={handleDeletePerson}
             onLogCoins={handleLogCoins}
             onDeleteLogEntry={handleDeleteLogEntry}
+            onResetCoins={handleResetCoins}
           />
         )}
 

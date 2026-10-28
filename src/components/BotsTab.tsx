@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { PersonBot, Pin, CoinLogEntry, BotStatus } from '../types';
 import { formatPHTime } from '../utils/storage';
+import { extractGoldNumber } from '../utils/ocr';
 import {
   UserPlus,
   Coins,
@@ -23,6 +24,10 @@ import {
   ImagePlus,
   Loader2,
   AlertTriangle,
+  RotateCcw,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 
 interface BotsTabProps {
@@ -46,6 +51,7 @@ interface BotsTabProps {
   onDeletePerson: (personId: string) => void;
   onLogCoins: (personId: string, amount: number) => void;
   onDeleteLogEntry: (personId: string, logId: string) => void;
+  onResetCoins?: (personId: string) => void;
 }
 
 export const BotsTab: React.FC<BotsTabProps> = ({
@@ -56,6 +62,7 @@ export const BotsTab: React.FC<BotsTabProps> = ({
   onDeletePerson,
   onLogCoins,
   onDeleteLogEntry,
+  onResetCoins,
 }) => {
   // Input state for coin accumulation inputs per person
   const [coinInputs, setCoinInputs] = useState<Record<string, string>>({});
@@ -81,6 +88,7 @@ export const BotsTab: React.FC<BotsTabProps> = ({
   // Confirmation prompts state
   const [personToDelete, setPersonToDelete] = useState<PersonBot | null>(null);
   const [logToDelete, setLogToDelete] = useState<{ person: PersonBot; log: CoinLogEntry } | null>(null);
+  const [personToResetCoins, setPersonToResetCoins] = useState<PersonBot | null>(null);
 
   // OCR state for extracting gold numbers from pasted images
   const [ocrLoading, setOcrLoading] = useState<Record<string, boolean>>({});
@@ -92,51 +100,36 @@ export const BotsTab: React.FC<BotsTabProps> = ({
     setOcrLoading((prev) => ({ ...prev, [personId]: true }));
     setOcrMessage((prev) => ({ ...prev, [personId]: 'Scanning image for gold...' }));
 
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const dataUrl = e.target?.result as string;
-      try {
-        const res = await fetch('/api/ocr-gold', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: dataUrl }),
+    try {
+      const extractedNumber = await extractGoldNumber(file, (status) => {
+        setOcrMessage((prev) => ({ ...prev, [personId]: status }));
+      });
+      setCoinInputs((prev) => ({ ...prev, [personId]: String(extractedNumber) }));
+      setOcrMessage((prev) => ({
+        ...prev,
+        [personId]: `Extracted: ${extractedNumber.toLocaleString()} gold`,
+      }));
+      setTimeout(() => {
+        setOcrMessage((prev) => {
+          const copy = { ...prev };
+          delete copy[personId];
+          return copy;
         });
-        const data = await res.json();
-        if (data.success && typeof data.number === 'number' && data.number > 0) {
-          setCoinInputs((prev) => ({ ...prev, [personId]: String(data.number) }));
-          setOcrMessage((prev) => ({ ...prev, [personId]: `Extracted: ${data.number.toLocaleString()} gold` }));
-          setTimeout(() => {
-            setOcrMessage((prev) => {
-              const copy = { ...prev };
-              delete copy[personId];
-              return copy;
-            });
-          }, 3500);
-        } else {
-          setOcrMessage((prev) => ({ ...prev, [personId]: 'Could not detect number' }));
-          setTimeout(() => {
-            setOcrMessage((prev) => {
-              const copy = { ...prev };
-              delete copy[personId];
-              return copy;
-            });
-          }, 3500);
-        }
-      } catch (err) {
-        console.error('OCR Error:', err);
-        setOcrMessage((prev) => ({ ...prev, [personId]: 'OCR request failed' }));
-        setTimeout(() => {
-          setOcrMessage((prev) => {
-            const copy = { ...prev };
-            delete copy[personId];
-            return copy;
-          });
-        }, 3000);
-      } finally {
-        setOcrLoading((prev) => ({ ...prev, [personId]: false }));
-      }
-    };
-    reader.readAsDataURL(file);
+      }, 3500);
+    } catch (err: any) {
+      console.error('OCR Error:', err);
+      const errMsg = err?.message || 'No gold number detected';
+      setOcrMessage((prev) => ({ ...prev, [personId]: errMsg }));
+      setTimeout(() => {
+        setOcrMessage((prev) => {
+          const copy = { ...prev };
+          delete copy[personId];
+          return copy;
+        });
+      }, 3500);
+    } finally {
+      setOcrLoading((prev) => ({ ...prev, [personId]: false }));
+    }
   };
 
   const handleCoinInputPaste = (personId: string, e: React.ClipboardEvent) => {
@@ -191,6 +184,42 @@ export const BotsTab: React.FC<BotsTabProps> = ({
     if (statusFilter === 'working') return (p.status || 'working') === 'working';
     if (statusFilter === 'banned') return p.status === 'banned';
     return true;
+  });
+
+  // Table Sorting state
+  type BotSortField = 'botNumber' | 'name' | 'status' | 'coins';
+  const [sortField, setSortField] = useState<BotSortField>('botNumber');
+  const [sortAsc, setSortAsc] = useState<boolean>(true);
+
+  const handleToggleSort = (field: BotSortField) => {
+    if (sortField === field) {
+      setSortAsc(!sortAsc);
+    } else {
+      setSortField(field);
+      setSortAsc(field === 'coins' ? false : true);
+    }
+  };
+
+  const sortedPersons = [...filteredPersons].sort((a, b) => {
+    let cmp = 0;
+    if (sortField === 'botNumber') {
+      const numA = parseInt(a.botNumber || '', 10);
+      const numB = parseInt(b.botNumber || '', 10);
+      if (!isNaN(numA) && !isNaN(numB)) {
+        cmp = numA - numB;
+      } else {
+        cmp = (a.botNumber || '').localeCompare(b.botNumber || '', undefined, { numeric: true });
+      }
+    } else if (sortField === 'name') {
+      cmp = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    } else if (sortField === 'status') {
+      const statusA = a.status || 'working';
+      const statusB = b.status || 'working';
+      cmp = statusA.localeCompare(statusB);
+    } else if (sortField === 'coins') {
+      cmp = (a.totalCoins || 0) - (b.totalCoins || 0);
+    }
+    return sortAsc ? cmp : -cmp;
   });
 
   // --- Handlers ---
@@ -404,6 +433,21 @@ export const BotsTab: React.FC<BotsTabProps> = ({
             </button>
           </div>
 
+          {/* Mobile Sort Toggle (Icon Only) */}
+          <button
+            type="button"
+            onClick={() => {
+              const fields: BotSortField[] = ['botNumber', 'name', 'status', 'coins'];
+              const nextIdx = (fields.indexOf(sortField) + 1) % fields.length;
+              handleToggleSort(fields[nextIdx]);
+            }}
+            title={`Sort: ${sortField} (${sortAsc ? 'Asc' : 'Desc'}) - tap to cycle`}
+            aria-label={`Sort by ${sortField}`}
+            className="sm:hidden p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg border border-slate-200 shadow-2xs transition-colors cursor-pointer flex items-center justify-center shrink-0"
+          >
+            <ArrowUpDown className="w-4 h-4" />
+          </button>
+
           {/* Add Person Button (Icon Only per user instruction) */}
           <button
             onClick={handleOpenAdd}
@@ -437,19 +481,78 @@ export const BotsTab: React.FC<BotsTabProps> = ({
         </div>
       ) : (
         <div className="bg-white rounded-xl border border-slate-200 shadow-xs divide-y divide-slate-100 overflow-hidden">
-          {/* Unified Column Headers for aligned table layout */}
+          {/* Unified Column Headers with Sort Controls for aligned table layout */}
           <div className="hidden sm:flex items-center justify-between px-4 py-2.5 bg-slate-50/90 text-[11px] font-semibold text-slate-500 uppercase tracking-wider select-none border-b border-slate-100">
             <div className="flex items-center gap-3 min-w-0 flex-1">
-              <div className="w-9 shrink-0 text-center">Bot</div>
-              <div className="w-36 sm:w-44 md:w-52 shrink-0">Name / Pin</div>
-              <div className="w-28 sm:w-32 shrink-0">Status</div>
-              <div className="w-28 sm:w-36 shrink-0">Coins</div>
+              {/* Bot Number Sort */}
+              <button
+                type="button"
+                onClick={() => handleToggleSort('botNumber')}
+                title={`Sort by Bot Number (${sortField === 'botNumber' ? (sortAsc ? 'Ascending' : 'Descending') : 'Click to sort'})`}
+                aria-label="Sort by Bot Number"
+                className="w-9 shrink-0 flex items-center justify-center gap-0.5 hover:text-slate-900 transition-colors cursor-pointer group"
+              >
+                <span>Bot</span>
+                {sortField === 'botNumber' ? (
+                  sortAsc ? <ArrowUp className="w-3 h-3 text-sky-600 stroke-[2.5]" /> : <ArrowDown className="w-3 h-3 text-sky-600 stroke-[2.5]" />
+                ) : (
+                  <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-500" />
+                )}
+              </button>
+
+              {/* Name / Pin Sort */}
+              <button
+                type="button"
+                onClick={() => handleToggleSort('name')}
+                title={`Sort by Name (${sortField === 'name' ? (sortAsc ? 'Ascending' : 'Descending') : 'Click to sort'})`}
+                aria-label="Sort by Name"
+                className="w-36 sm:w-44 md:w-52 shrink-0 flex items-center gap-1 hover:text-slate-900 transition-colors cursor-pointer group text-left"
+              >
+                <span>Name / Pin</span>
+                {sortField === 'name' ? (
+                  sortAsc ? <ArrowUp className="w-3 h-3 text-sky-600 stroke-[2.5]" /> : <ArrowDown className="w-3 h-3 text-sky-600 stroke-[2.5]" />
+                ) : (
+                  <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-500" />
+                )}
+              </button>
+
+              {/* Status Sort */}
+              <button
+                type="button"
+                onClick={() => handleToggleSort('status')}
+                title={`Sort by Status (${sortField === 'status' ? (sortAsc ? 'Ascending' : 'Descending') : 'Click to sort'})`}
+                aria-label="Sort by Status"
+                className="w-28 sm:w-32 shrink-0 flex items-center gap-1 hover:text-slate-900 transition-colors cursor-pointer group text-left"
+              >
+                <span>Status</span>
+                {sortField === 'status' ? (
+                  sortAsc ? <ArrowUp className="w-3 h-3 text-sky-600 stroke-[2.5]" /> : <ArrowDown className="w-3 h-3 text-sky-600 stroke-[2.5]" />
+                ) : (
+                  <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-500" />
+                )}
+              </button>
+
+              {/* Coins Sort */}
+              <button
+                type="button"
+                onClick={() => handleToggleSort('coins')}
+                title={`Sort by Coins (${sortField === 'coins' ? (sortAsc ? 'Ascending' : 'Descending') : 'Click to sort'})`}
+                aria-label="Sort by Coins"
+                className="w-28 sm:w-36 shrink-0 flex items-center gap-1 hover:text-slate-900 transition-colors cursor-pointer group text-left"
+              >
+                <span>Coins</span>
+                {sortField === 'coins' ? (
+                  sortAsc ? <ArrowUp className="w-3 h-3 text-sky-600 stroke-[2.5]" /> : <ArrowDown className="w-3 h-3 text-sky-600 stroke-[2.5]" />
+                ) : (
+                  <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-500" />
+                )}
+              </button>
             </div>
             <div className="shrink-0 text-right text-[11px] text-slate-400 font-medium normal-case tracking-normal pr-1">
               Log & Actions
             </div>
           </div>
-          {filteredPersons.map((person) => {
+          {sortedPersons.map((person) => {
             const hasAssignedPin = Boolean(person.assignedPinId);
             const assignedPinObj = pins.find((p) => p.id === person.assignedPinId);
             const isBanned = person.status === 'banned';
@@ -631,7 +734,18 @@ export const BotsTab: React.FC<BotsTabProps> = ({
                     <History className="w-4 h-4" />
                   </button>
 
-                  {/* 4. Edit button (Icon only) */}
+                  {/* 4. Reset Coins button (Icon only with confirmation prompt) */}
+                  <button
+                    type="button"
+                    onClick={() => setPersonToResetCoins(person)}
+                    title="Reset Coins to 0 (Sold Coins)"
+                    aria-label="Reset Coins to 0 (Sold Coins)"
+                    className="p-1.5 sm:p-2 text-amber-600 hover:text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200/80 rounded-lg transition-colors cursor-pointer flex items-center justify-center shrink-0"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                  </button>
+
+                  {/* 5. Edit button (Icon only) */}
                   <button
                     type="button"
                     onClick={() => handleOpenEdit(person)}
@@ -1080,7 +1194,7 @@ export const BotsTab: React.FC<BotsTabProps> = ({
                           ) : (
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-bold text-amber-600 font-mono text-sm">
-                                +{(log.amount || 0).toLocaleString()} coins
+                                {(log.amount || 0).toLocaleString()} coins
                               </span>
                               {log.pinName && (
                                 <span className="inline-flex items-center gap-1 text-[11px] text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded font-medium">
@@ -1208,6 +1322,51 @@ export const BotsTab: React.FC<BotsTabProps> = ({
                 className="p-1.5 text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors shadow-xs cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- CONFIRMATION MODAL: Reset Bot Coins to 0 (Sold Coins) --- */}
+      {personToResetCoins && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm overflow-hidden p-5 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                <RotateCcw className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Reset Coins to 0?</h3>
+                <p className="text-xs text-slate-500">Record coins as sold</p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-600 mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
+              Reset coins for <strong>{personToResetCoins.name}</strong>
+              {personToResetCoins.botNumber ? ` (Bot ${personToResetCoins.botNumber})` : ''} to <strong>0</strong>?
+              Currently holding <strong>{personToResetCoins.totalCoins.toLocaleString()} coins</strong>. This logs the sale and sets a fresh baseline for future gold updates.
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPersonToResetCoins(null)}
+                title="Cancel"
+                aria-label="Cancel"
+                className="p-2 text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onResetCoins) onResetCoins(personToResetCoins.id);
+                  setPersonToResetCoins(null);
+                }}
+                title="Confirm Reset to 0"
+                aria-label="Confirm Reset to 0"
+                className="p-2 text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors shadow-xs cursor-pointer flex items-center justify-center"
+              >
+                <Check className="w-4 h-4" />
               </button>
             </div>
           </div>

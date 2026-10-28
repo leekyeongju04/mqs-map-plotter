@@ -69,6 +69,7 @@ export interface CoinLogEntry {
   timestamp: string;
   phTime: string;
   note?: string;
+  rawReading?: number;
 }
 
 export interface PersonBot {

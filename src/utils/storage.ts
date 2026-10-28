@@ -203,7 +203,31 @@ export function exportDataAsJson(
 export function getLocalPersons(): PersonBot[] {
   try {
     const raw = localStorage.getItem(LOCAL_PERSONS_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const list: PersonBot[] = JSON.parse(raw);
+    return list.map((person) => {
+      const chrono = [...(person.logs || [])]
+        .map((l) => ({ l, t: new Date(l.timestamp).getTime() }))
+        .filter((x) => !isNaN(x.t))
+        .sort((a, b) => a.t - b.t);
+
+      let currentCoins = person.totalCoins || 0;
+      let hasCoinLogs = false;
+      for (const { l } of chrono) {
+        if (l.type === 'status_change' && l.note?.toLowerCase().includes('coins reset to 0')) {
+          currentCoins = 0;
+          continue;
+        }
+        if (l.type === 'coins' && typeof l.amount === 'number') {
+          hasCoinLogs = true;
+          currentCoins = l.amount;
+        }
+      }
+      return {
+        ...person,
+        totalCoins: hasCoinLogs ? currentCoins : (person.totalCoins || 0),
+      };
+    });
   } catch (e) {
     console.error('Failed to load local persons', e);
     return [];
@@ -241,75 +265,81 @@ export function formatPHTime(dateInput: Date | string | number = new Date()): st
   }
 }
 
+interface PinInterval {
+  pinId: string;
+  coins: number;
+  hours: number;
+}
+
+function collectBotIntervals(person: PersonBot): PinInterval[] {
+  const logs = [...(person.logs || [])]
+    .map((l) => ({ l, t: new Date(l.timestamp).getTime() }))
+    .filter((x) => !isNaN(x.t))
+    .sort((a, b) => a.t - b.t);
+
+  const intervals: PinInterval[] = [];
+  let baseline: { time: number; pinId: string; coins: number } | null = null;
+
+  for (const { l, t } of logs) {
+    if (l.type === 'pin_change' || l.type === 'status_change') {
+      baseline = null;
+      continue;
+    }
+    const pinId = l.pinId || person.assignedPinId;
+    const amount = typeof l.amount === 'number' ? l.amount : 0;
+    if (!pinId || amount <= 0) continue;
+
+    if (baseline && baseline.pinId === pinId) {
+      const hours = (t - baseline.time) / 3_600_000;
+      const earnedCoins = amount - baseline.coins;
+      if (hours > 0 && earnedCoins > 0) {
+        intervals.push({ pinId, coins: earnedCoins, hours });
+      }
+    }
+    baseline = { time: t, pinId, coins: amount };
+  }
+  return intervals;
+}
+
 export function calculatePinDailyStats(pinId: string, persons: PersonBot[]): PinDailyStats {
-  const pinLogs: { amount: number; time: number; timestamp: string }[] = [];
+  const getPHDateString = (d: number | string | Date) =>
+    new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date(d));
+  const todayPHStr = getPHDateString(new Date());
+
+  let totalCoins = 0;
+  let todayCoins = 0;
+  let logCount = 0;
+  let lastTime = 0;
+  let lastLoggedAt: string | undefined;
+  let rateCoins = 0;
+  let rateHours = 0;
 
   for (const person of persons) {
+    for (const iv of collectBotIntervals(person)) {
+      if (iv.pinId !== pinId) continue;
+      rateCoins += iv.coins;
+      rateHours += iv.hours;
+    }
+
     for (const log of person.logs || []) {
-      if (
-        log.type === 'coins' &&
-        (log.pinId === pinId || (!log.pinId && person.assignedPinId === pinId))
-      ) {
-        const time = new Date(log.timestamp).getTime();
-        const amt = typeof log.amount === 'number' ? log.amount : 0;
-        if (!isNaN(time) && amt > 0) {
-          pinLogs.push({ amount: amt, time, timestamp: log.timestamp });
-        }
+      if (log.type !== 'coins') continue;
+      if (!(log.pinId === pinId || (!log.pinId && person.assignedPinId === pinId))) continue;
+      const t = new Date(log.timestamp).getTime();
+      const amt = typeof log.amount === 'number' ? log.amount : 0;
+      if (isNaN(t) || amt <= 0) continue;
+
+      logCount++;
+      if (t > lastTime) {
+        lastTime = t;
+        lastLoggedAt = log.timestamp;
       }
     }
   }
 
-  if (pinLogs.length === 0) {
-    return {
-      pinId,
-      totalCoins: 0,
-      coinsPerDay: 0,
-      todayCoins: 0,
-      logCount: 0,
-    };
-  }
-
-  pinLogs.sort((a, b) => a.time - b.time);
-  const totalCoins = pinLogs.reduce((sum, l) => sum + l.amount, 0);
-
-  const getPHDateString = (d: number | string | Date) => {
-    try {
-      const dt = typeof d === 'number' || typeof d === 'string' ? new Date(d) : d;
-      return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(dt);
-    } catch {
-      return new Date(d).toISOString().slice(0, 10);
-    }
-  };
-
-  const todayPHStr = getPHDateString(new Date());
-  const todayCoins = pinLogs
-    .filter((l) => getPHDateString(l.time) === todayPHStr)
-    .reduce((sum, l) => sum + l.amount, 0);
-
-  const uniqueDays = new Set(pinLogs.map((l) => getPHDateString(l.time)));
-  const firstTime = pinLogs[0].time;
-  const lastTime = pinLogs[pinLogs.length - 1].time;
-  const hoursSpan = (lastTime - firstTime) / (1000 * 60 * 60);
-
-  let coinsPerDay = 0;
-  if (uniqueDays.size > 1) {
-    const daysSpan = Math.max(uniqueDays.size, Math.ceil(hoursSpan / 24));
-    coinsPerDay = Math.round(totalCoins / daysSpan);
-  } else if (hoursSpan >= 1) {
-    coinsPerDay = Math.round((totalCoins / hoursSpan) * 24);
-  } else {
-    // If only one entry or within an hour, daily capacity baseline is the accumulated coins today
-    coinsPerDay = todayCoins > 0 ? todayCoins : totalCoins;
-  }
-
-  return {
-    pinId,
-    totalCoins,
-    coinsPerDay,
-    todayCoins,
-    logCount: pinLogs.length,
-    lastLoggedAt: pinLogs[pinLogs.length - 1].timestamp,
-  };
+  const coinsPerDay = rateHours > 0 ? Math.round((rateCoins / rateHours) * 24) : 0;
+  totalCoins = rateCoins;
+  todayCoins = rateCoins;
+  return { pinId, totalCoins, coinsPerDay, todayCoins, logCount, lastLoggedAt };
 }
 
 export function calculateAllPinsDailyStats(

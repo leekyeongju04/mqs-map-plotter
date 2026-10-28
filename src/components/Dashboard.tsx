@@ -69,6 +69,7 @@ interface DashboardProps {
   onDeletePerson: (personId: string) => void;
   onLogCoins: (personId: string, amount: number) => void;
   onDeleteLogEntry: (personId: string, logId: string) => void;
+  onResetCoins?: (personId: string) => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -90,6 +91,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onDeletePerson,
   onLogCoins,
   onDeleteLogEntry,
+  onResetCoins,
 }) => {
   // 3 Dashboard Tabs: 'pins' (current dashboard components), 'bots', 'budget'
   const [activeDashboardTab, setActiveDashboardTab] = useState<'pins' | 'bots' | 'budget'>('pins');
@@ -1213,6 +1215,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           onDeletePerson={onDeletePerson}
           onLogCoins={onLogCoins}
           onDeleteLogEntry={onDeleteLogEntry}
+          onResetCoins={onResetCoins}
         />
       )}
 
@@ -1344,10 +1347,29 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <Check className="w-4 h-4 stroke-[3]" />
                 </div>
                 <div className="text-xs text-slate-600 space-y-1">
-                  <p className="font-bold text-slate-900">WebAPK Ready</p>
+                  <p className="font-bold text-slate-900">Android APK & WebAPK (v1.0.0)</p>
                   <p>
-                    This app includes full Web App Manifest, auto-updating service workers, and high-res maskable Android icons for native WebAPK generation.
+                    Built package includes full Android manifest, offline cache, and adaptive high-res icons.
                   </p>
+                </div>
+              </div>
+
+              {/* Versioned APK Download Action (Icon Only) */}
+              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-slate-800 block">Download Android APK</span>
+                    <span className="text-[11px] text-slate-500 font-mono">mqs-map-plotter-v1.0.0.apk</span>
+                  </div>
+                  <a
+                    href="/mqs-map-plotter-v1.0.0.apk"
+                    download="mqs-map-plotter-v1.0.0.apk"
+                    title="Download APK v1.0.0"
+                    aria-label="Download APK v1.0.0"
+                    className="p-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs transition-colors flex items-center justify-center shrink-0 cursor-pointer"
+                  >
+                    <Download className="w-4 h-4" />
+                  </a>
                 </div>
               </div>
 
@@ -1357,24 +1379,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <span>App is already running as an installed standalone app!</span>
                 </div>
               ) : isInstallable ? (
-                <div className="space-y-2">
-                  <p className="text-xs text-slate-500">
-                    Click the install button below to generate and install the native Android WebAPK on your device:
-                  </p>
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        await install();
-                        setIsApkModalOpen(false);
-                      }}
-                      title="Install Native App / APK"
-                      aria-label="Install Native App / APK"
-                      className="p-3 text-white bg-sky-600 hover:bg-sky-700 rounded-xl transition-colors shadow-xs cursor-pointer flex items-center justify-center gap-2 w-full font-semibold text-xs"
-                    >
-                      <Download className="w-4 h-4" />
-                    </button>
+                <div className="flex items-center justify-between p-3.5 rounded-2xl bg-sky-50/70 border border-sky-100">
+                  <div className="text-xs text-sky-900">
+                    <span className="font-bold block">One-click WebAPK Install</span>
+                    <span className="text-[11px] text-sky-700">Install directly to home screen</span>
                   </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await install();
+                      setIsApkModalOpen(false);
+                    }}
+                    title="Install WebAPK"
+                    aria-label="Install WebAPK"
+                    className="p-2.5 text-white bg-sky-600 hover:bg-sky-700 rounded-xl transition-colors shadow-xs cursor-pointer flex items-center justify-center shrink-0"
+                  >
+                    <Smartphone className="w-4 h-4" />
+                  </button>
                 </div>
               ) : isIOS ? (
                 <div className="p-3.5 rounded-2xl bg-indigo-50/70 border border-indigo-100 text-xs text-slate-700 space-y-1.5">
@@ -1383,16 +1404,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <p>2. Select <strong>Add to Home Screen</strong>.</p>
                 </div>
               ) : (
-                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 text-xs text-slate-600 space-y-2">
-                  <p className="font-bold text-slate-900">How to Install on Android:</p>
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 text-xs text-slate-600 space-y-1.5">
+                  <p className="font-bold text-slate-900">Direct APK Installation:</p>
                   <p>
-                    1. Open this app in Chrome on your Android device.
-                  </p>
-                  <p>
-                    2. Tap the browser menu (⋮) and select <strong>Install app</strong> or <strong>Add to Home screen</strong>.
-                  </p>
-                  <p>
-                    3. Android will automatically package and install the app as an APK on your home screen.
+                    Download <strong>mqs-map-plotter-v1.0.0.apk</strong> using the green download button above, then tap to install on your Android device.
                   </p>
                 </div>
               )}
