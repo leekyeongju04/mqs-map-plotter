@@ -6,6 +6,7 @@ import {
   setDoc,
   deleteDoc,
   onSnapshot,
+  writeBatch,
 } from 'firebase/firestore';
 import {
   auth,
@@ -891,6 +892,43 @@ export default function App() {
     }
   };
 
+  const handleResetAllCoins = async () => {
+    if (persons.length === 0) return;
+    const now = new Date();
+    const updatedList = persons.map((person) => {
+      const resetLog: CoinLogEntry = {
+        id: `log-reset-all-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+        type: 'status_change',
+        timestamp: now.toISOString(),
+        phTime: formatPHTime(now),
+        note: `Coins reset to 0 (Sold ${person.totalCoins.toLocaleString()} coins via Reset All)`,
+      };
+
+      return {
+        ...person,
+        totalCoins: 0,
+        updatedAt: now.toISOString(),
+        logs: [resetLog, ...(person.logs || [])],
+      };
+    });
+
+    setPersons(updatedList);
+    saveLocalPersons(updatedList);
+
+    if (user) {
+      try {
+        const batch = writeBatch(db);
+        for (const updatedPerson of updatedList) {
+          const docRef = doc(db, 'users', user.uid, 'persons', updatedPerson.id);
+          batch.set(docRef, sanitizeForFirestore(updatedPerson));
+        }
+        await batch.commit();
+      } catch (err) {
+        console.warn('Firestore reset all coins batch error:', err);
+      }
+    }
+  };
+
   const handleDeleteLogEntry = async (personId: string, logId: string) => {
     const currentPerson = persons.find((p) => p.id === personId);
     if (!currentPerson) return;
@@ -1015,6 +1053,7 @@ export default function App() {
             onLogCoins={handleLogCoins}
             onDeleteLogEntry={handleDeleteLogEntry}
             onResetCoins={handleResetCoins}
+            onResetAllCoins={handleResetAllCoins}
           />
         )}
 

@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { PersonBot, Pin, CoinLogEntry, BotStatus } from '../types';
-import { formatPHTime } from '../utils/storage';
+import { formatPHTime, calculatePinDailyStats } from '../utils/storage';
 import { extractGoldNumber } from '../utils/ocr';
 import {
   UserPlus,
@@ -52,6 +52,7 @@ interface BotsTabProps {
   onLogCoins: (personId: string, amount: number) => void;
   onDeleteLogEntry: (personId: string, logId: string) => void;
   onResetCoins?: (personId: string) => void;
+  onResetAllCoins?: () => void;
 }
 
 export const BotsTab: React.FC<BotsTabProps> = ({
@@ -63,6 +64,7 @@ export const BotsTab: React.FC<BotsTabProps> = ({
   onLogCoins,
   onDeleteLogEntry,
   onResetCoins,
+  onResetAllCoins,
 }) => {
   // Input state for coin accumulation inputs per person
   const [coinInputs, setCoinInputs] = useState<Record<string, string>>({});
@@ -89,6 +91,7 @@ export const BotsTab: React.FC<BotsTabProps> = ({
   const [personToDelete, setPersonToDelete] = useState<PersonBot | null>(null);
   const [logToDelete, setLogToDelete] = useState<{ person: PersonBot; log: CoinLogEntry } | null>(null);
   const [personToResetCoins, setPersonToResetCoins] = useState<PersonBot | null>(null);
+  const [isResetAllModalOpen, setIsResetAllModalOpen] = useState(false);
 
   // OCR state for extracting gold numbers from pasted images
   const [ocrLoading, setOcrLoading] = useState<Record<string, boolean>>({});
@@ -154,22 +157,101 @@ export const BotsTab: React.FC<BotsTabProps> = ({
       ? [...persons].sort((a, b) => b.totalCoins - a.totalCoins)[0]
       : null;
 
-  // 2. Top Performing Pin (Total coins accumulated while using each pin)
-  const pinCoinsMap = new Map<string, { pinId: string; pinName: string; coins: number }>();
-  persons.forEach((person) => {
-    person.logs.forEach((log) => {
-      if (log.type === 'coins' && log.amount && log.amount > 0) {
-        const pId = log.pinId || person.assignedPinId || 'unassigned';
-        const pName = log.pinName || person.assignedPinName || 'Unassigned';
-        const current = pinCoinsMap.get(pId) || { pinId: pId, pinName: pName, coins: 0 };
-        current.coins += log.amount;
-        pinCoinsMap.set(pId, current);
-      }
+  // 2. Best Pin by Average Yield (Calculated from gathered bot data: rate per bot per day, not sum of bots)
+  const allKnownPinIds = new Set<string>();
+  pins.forEach((p) => {
+    if (p.id) allKnownPinIds.add(p.id);
+  });
+  persons.forEach((p) => {
+    if (p.assignedPinId) allKnownPinIds.add(p.assignedPinId);
+    (p.logs || []).forEach((l) => {
+      if (l.pinId) allKnownPinIds.add(l.pinId);
     });
   });
 
-  const pinRankings = Array.from(pinCoinsMap.values()).sort((a, b) => b.coins - a.coins);
-  const topPin = pinRankings.length > 0 && pinRankings[0].coins > 0 ? pinRankings[0] : null;
+  interface PinAvgMetric {
+    pinId: string;
+    pinName: string;
+    coinsPerDay: number; // Interval-based rate: gold per bot per day on that pin
+    avgCoinsPerBot: number; // Average coins gathered per bot with records on this pin
+    botCount: number;
+    hasIntervalRate: boolean;
+  }
+
+  const pinAvgMetrics: PinAvgMetric[] = [];
+
+  allKnownPinIds.forEach((pId) => {
+    const pinObj = pins.find((p) => p.id === pId);
+    let pinName = pinObj?.name;
+    if (!pinName) {
+      for (const p of persons) {
+        if (p.assignedPinId === pId && p.assignedPinName) {
+          pinName = p.assignedPinName;
+          break;
+        }
+        const foundLog = (p.logs || []).find((l) => l.pinId === pId && l.pinName);
+        if (foundLog?.pinName) {
+          pinName = foundLog.pinName;
+          break;
+        }
+      }
+    }
+    pinName = pinName || (pId === 'unassigned' ? 'Unassigned' : `Pin #${pId.slice(0, 6)}`);
+
+    // 1. Calculate interval-based daily yield stats (gold per bot per day)
+    const stats = calculatePinDailyStats(pId, persons);
+
+    // 2. Calculate bot-level average coins gathered on this pin
+    const botsFarmedThisPin = persons.filter((p) => {
+      if (p.assignedPinId === pId && (p.totalCoins || 0) > 0) return true;
+      return (p.logs || []).some(
+        (l) =>
+          (l.pinId === pId || (!l.pinId && p.assignedPinId === pId)) &&
+          l.type === 'coins' &&
+          (l.amount || 0) > 0
+      );
+    });
+
+    const botCoinValues = botsFarmedThisPin
+      .map((p) => {
+        if (p.assignedPinId === pId) return p.totalCoins || 0;
+        const coinLogs = (p.logs || [])
+          .filter((l) => l.type === 'coins' && l.pinId === pId && typeof l.amount === 'number')
+          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+        return coinLogs[0]?.amount || 0;
+      })
+      .filter((c) => c > 0);
+
+    const avgCoins =
+      botCoinValues.length > 0
+        ? Math.round(botCoinValues.reduce((a, b) => a + b, 0) / botCoinValues.length)
+        : 0;
+
+    if (stats.coinsPerDay > 0 || avgCoins > 0) {
+      pinAvgMetrics.push({
+        pinId: pId,
+        pinName,
+        coinsPerDay: stats.coinsPerDay,
+        avgCoinsPerBot: avgCoins,
+        botCount: botCoinValues.length,
+        hasIntervalRate: stats.coinsPerDay > 0,
+      });
+    }
+  });
+
+  // Sort pins by average yield:
+  // - Primary: Interval-based coinsPerDay rate (gold/bot/day)
+  // - Secondary: Average coins gathered per bot
+  pinAvgMetrics.sort((a, b) => {
+    if (a.hasIntervalRate && b.hasIntervalRate) {
+      return b.coinsPerDay - a.coinsPerDay;
+    }
+    if (a.hasIntervalRate && !b.hasIntervalRate) return -1;
+    if (!a.hasIntervalRate && b.hasIntervalRate) return 1;
+    return b.avgCoinsPerBot - a.avgCoinsPerBot;
+  });
+
+  const bestAvgPin = pinAvgMetrics.length > 0 ? pinAvgMetrics[0] : null;
 
   // 3. Total Farmed Coins across all persons
   const totalCoinsAll = persons.reduce((sum, p) => sum + (p.totalCoins || 0), 0);
@@ -328,19 +410,38 @@ export const BotsTab: React.FC<BotsTabProps> = ({
           </div>
         </div>
 
-        {/* Top Performing Pin */}
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between">
+        {/* Best Pin by Average Yield (Calculated from bot data, not sum of bots) */}
+        <div
+          className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between"
+          title="Best performing landmark pin based on average yield gathered by bots (not summed)"
+        >
           <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
-            <span>Top Pin</span>
+            <span>Best Pin (Avg Yield)</span>
             <Flame className="w-3.5 h-3.5 text-orange-500" />
           </div>
           <div className="mt-2">
-            <span className="text-base sm:text-lg font-bold text-slate-900 truncate block">
-              {topPin ? topPin.pinName : '—'}
+            <span
+              className="text-base sm:text-lg font-bold text-slate-900 truncate block"
+              title={bestAvgPin ? bestAvgPin.pinName : undefined}
+            >
+              {bestAvgPin ? bestAvgPin.pinName : '—'}
             </span>
-            <span className="text-xs text-orange-600 font-mono font-semibold">
-              {topPin ? `${topPin.coins.toLocaleString()} coins` : 'No pin records'}
-            </span>
+            <div className="flex items-baseline gap-1 mt-0.5">
+              <span className="text-xs text-orange-600 font-mono font-semibold">
+                {bestAvgPin
+                  ? bestAvgPin.hasIntervalRate
+                    ? `+${bestAvgPin.coinsPerDay.toLocaleString()} gold/day`
+                    : `${bestAvgPin.avgCoinsPerBot.toLocaleString()} avg gold`
+                  : 'No yield records'}
+              </span>
+              {bestAvgPin && (
+                <span className="text-[10px] text-slate-400 font-normal">
+                  {bestAvgPin.hasIntervalRate
+                    ? `(~${Math.round(bestAvgPin.coinsPerDay / 24).toLocaleString()}/hr)`
+                    : `(${bestAvgPin.botCount} ${bestAvgPin.botCount === 1 ? 'bot' : 'bots'})`}
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -348,7 +449,20 @@ export const BotsTab: React.FC<BotsTabProps> = ({
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between">
           <div className="flex items-center justify-between text-xs text-slate-400 font-medium">
             <span>Total Farmed</span>
-            <Coins className="w-3.5 h-3.5 text-yellow-500" />
+            <div className="flex items-center gap-1.5">
+              {totalCoinsAll > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setIsResetAllModalOpen(true)}
+                  title="Reset All Bots Coins to 0"
+                  aria-label="Reset All Bots Coins"
+                  className="p-1 rounded-md text-amber-600 hover:text-amber-700 hover:bg-amber-50 transition-colors cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
+              )}
+              <Coins className="w-3.5 h-3.5 text-yellow-500" />
+            </div>
           </div>
           <div className="mt-2">
             <span className="text-xl sm:text-2xl font-bold text-slate-900 font-mono tabular-nums">
@@ -446,6 +560,26 @@ export const BotsTab: React.FC<BotsTabProps> = ({
             className="sm:hidden p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg border border-slate-200 shadow-2xs transition-colors cursor-pointer flex items-center justify-center shrink-0"
           >
             <ArrowUpDown className="w-4 h-4" />
+          </button>
+
+          {/* Unified Reset All Bots Coins Button (Icon Only per user instruction) */}
+          <button
+            type="button"
+            onClick={() => setIsResetAllModalOpen(true)}
+            disabled={totalCoinsAll === 0}
+            title={
+              totalCoinsAll > 0
+                ? `Reset All Bots Coins to 0 (${totalCoinsAll.toLocaleString()} coins sold)`
+                : 'All bot coins are already 0'
+            }
+            aria-label="Reset All Bots Coins to 0"
+            className={`p-2.5 rounded-lg border shadow-xs transition-colors flex items-center justify-center shrink-0 cursor-pointer ${
+              totalCoinsAll > 0
+                ? 'bg-amber-50 hover:bg-amber-100 text-amber-600 hover:text-amber-700 border-amber-200/80'
+                : 'bg-slate-50 text-slate-300 border-slate-200 cursor-not-allowed opacity-60'
+            }`}
+          >
+            <RotateCcw className="w-4 h-4" />
           </button>
 
           {/* Add Person Button (Icon Only per user instruction) */}
@@ -1364,6 +1498,50 @@ export const BotsTab: React.FC<BotsTabProps> = ({
                 }}
                 title="Confirm Reset to 0"
                 aria-label="Confirm Reset to 0"
+                className="p-2 text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors shadow-xs cursor-pointer flex items-center justify-center"
+              >
+                <Check className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- CONFIRMATION MODAL: Reset All Bots' Coins to 0 (Sold Coins) --- */}
+      {isResetAllModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm overflow-hidden p-5 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                <RotateCcw className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Reset All Bots' Coins?</h3>
+                <p className="text-xs text-slate-500">Record all coins as sold</p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-600 mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
+              Are you sure you want to reset coins for <strong>all {persons.length} bot workers</strong> to <strong>0</strong>?
+              A total of <strong className="text-amber-600">{totalCoinsAll.toLocaleString()} coins</strong> will be recorded as sold, establishing a fresh baseline.
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsResetAllModalOpen(false)}
+                title="Cancel"
+                aria-label="Cancel"
+                className="p-2 text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (onResetAllCoins) onResetAllCoins();
+                  setIsResetAllModalOpen(false);
+                }}
+                title="Confirm Reset All to 0"
+                aria-label="Confirm Reset All to 0"
                 className="p-2 text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors shadow-xs cursor-pointer flex items-center justify-center"
               >
                 <Check className="w-4 h-4" />

@@ -70,6 +70,7 @@ interface DashboardProps {
   onLogCoins: (personId: string, amount: number) => void;
   onDeleteLogEntry: (personId: string, logId: string) => void;
   onResetCoins?: (personId: string) => void;
+  onResetAllCoins?: () => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -92,6 +93,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onLogCoins,
   onDeleteLogEntry,
   onResetCoins,
+  onResetAllCoins,
 }) => {
   // 3 Dashboard Tabs: 'pins' (current dashboard components), 'bots', 'budget'
   const [activeDashboardTab, setActiveDashboardTab] = useState<'pins' | 'bots' | 'budget'>('pins');
@@ -1216,6 +1218,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           onLogCoins={onLogCoins}
           onDeleteLogEntry={onDeleteLogEntry}
           onResetCoins={onResetCoins}
+          onResetAllCoins={onResetAllCoins}
         />
       )}
 
@@ -1347,7 +1350,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <Check className="w-4 h-4 stroke-[3]" />
                 </div>
                 <div className="text-xs text-slate-600 space-y-1">
-                  <p className="font-bold text-slate-900">Android APK & WebAPK (v1.0.0)</p>
+                  <p className="font-bold text-slate-900">Android APK & WebAPK (v1.0.2)</p>
                   <p>
                     Built package includes full Android manifest, offline cache, and adaptive high-res icons.
                   </p>
@@ -1359,13 +1362,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div className="flex items-center justify-between">
                   <div>
                     <span className="text-xs font-bold text-slate-800 block">Download Android APK</span>
-                    <span className="text-[11px] text-slate-500 font-mono">mqs-map-plotter-v1.0.0.apk</span>
+                    <span className="text-[11px] text-slate-500 font-mono">mqs-map-plotter-v1.0.2.apk</span>
                   </div>
                   <a
-                    href="/mqs-map-plotter-v1.0.0.apk"
-                    download="mqs-map-plotter-v1.0.0.apk"
-                    title="Download APK v1.0.0"
-                    aria-label="Download APK v1.0.0"
+                    href="/mqs-map-plotter-v1.0.2.apk"
+                    download="mqs-map-plotter-v1.0.2.apk"
+                    title="Download APK v1.0.2"
+                    aria-label="Download APK v1.0.2"
                     className="p-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs transition-colors flex items-center justify-center shrink-0 cursor-pointer"
                   >
                     <Download className="w-4 h-4" />
