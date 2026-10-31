@@ -301,9 +301,10 @@ function collectBotIntervals(person: PersonBot): PinInterval[] {
   return intervals;
 }
 
+export const getPHDateString = (d: number | string | Date = new Date()) =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date(d));
+
 export function calculatePinDailyStats(pinId: string, persons: PersonBot[]): PinDailyStats {
-  const getPHDateString = (d: number | string | Date) =>
-    new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date(d));
   const todayPHStr = getPHDateString(new Date());
 
   let totalCoins = 0;

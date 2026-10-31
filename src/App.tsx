@@ -647,7 +647,8 @@ export default function App() {
     assignedPinId?: string,
     status: BotStatus = 'working',
     banLiftDate?: string,
-    botNumber?: string
+    botNumber?: string,
+    botLevel?: string
   ) => {
     const assignedPin = pins.find((p) => p.id === assignedPinId);
     const personId = `person-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
@@ -682,6 +683,7 @@ export default function App() {
       id: personId,
       name,
       botNumber: botNumber?.trim() || undefined,
+      botLevel: botLevel?.trim() || undefined,
       assignedPinId: assignedPinId || undefined,
       assignedPinName: assignedPin?.name || undefined,
       status,
@@ -712,7 +714,8 @@ export default function App() {
     newPinId?: string,
     status: BotStatus = 'working',
     banLiftDate?: string,
-    botNumber?: string
+    botNumber?: string,
+    botLevel?: string
   ) => {
     const currentPerson = persons.find((p) => p.id === personId);
     if (!currentPerson) return;
@@ -765,6 +768,7 @@ export default function App() {
       ...currentPerson,
       name,
       botNumber: botNumber?.trim() || undefined,
+      botLevel: botLevel !== undefined ? botLevel.trim() || undefined : currentPerson.botLevel,
       assignedPinId: newPinId || undefined,
       assignedPinName: newPinName || undefined,
       status,

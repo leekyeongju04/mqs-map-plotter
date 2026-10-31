@@ -76,6 +76,7 @@ export interface PersonBot {
   id: string;
   name: string;
   botNumber?: string;
+  botLevel?: string;
   assignedPinId?: string;
   assignedPinName?: string;
   status?: BotStatus;

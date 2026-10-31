@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { PersonBot, Pin, CoinLogEntry, BotStatus } from '../types';
-import { formatPHTime, calculatePinDailyStats } from '../utils/storage';
+import { formatPHTime, calculatePinDailyStats, getPHDateString } from '../utils/storage';
 import { extractGoldNumber } from '../utils/ocr';
 import {
   UserPlus,
@@ -38,7 +38,8 @@ interface BotsTabProps {
     assignedPinId?: string,
     status?: BotStatus,
     banLiftDate?: string,
-    botNumber?: string
+    botNumber?: string,
+    botLevel?: string
   ) => void;
   onUpdatePerson: (
     personId: string,
@@ -46,7 +47,8 @@ interface BotsTabProps {
     newPinId?: string,
     status?: BotStatus,
     banLiftDate?: string,
-    botNumber?: string
+    botNumber?: string,
+    botLevel?: string
   ) => void;
   onDeletePerson: (personId: string) => void;
   onLogCoins: (personId: string, amount: number) => void;
@@ -73,6 +75,7 @@ export const BotsTab: React.FC<BotsTabProps> = ({
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newBotNumber, setNewBotNumber] = useState('');
+  const [newBotLevel, setNewBotLevel] = useState('');
   const [newPinId, setNewPinId] = useState('');
   const [newStatus, setNewStatus] = useState<BotStatus>('working');
   const [newBanLiftDate, setNewBanLiftDate] = useState('');
@@ -80,6 +83,7 @@ export const BotsTab: React.FC<BotsTabProps> = ({
   const [editingPerson, setEditingPerson] = useState<PersonBot | null>(null);
   const [editName, setEditName] = useState('');
   const [editBotNumber, setEditBotNumber] = useState('');
+  const [editBotLevel, setEditBotLevel] = useState('');
   const [editPinId, setEditPinId] = useState('');
   const [editStatus, setEditStatus] = useState<BotStatus>('working');
   const [editBanLiftDate, setEditBanLiftDate] = useState('');
@@ -252,6 +256,7 @@ export const BotsTab: React.FC<BotsTabProps> = ({
   });
 
   const bestAvgPin = pinAvgMetrics.length > 0 ? pinAvgMetrics[0] : null;
+  const totalWorkforceDailyRate = pinAvgMetrics.reduce((sum, m) => sum + m.coinsPerDay, 0);
 
   // 3. Total Farmed Coins across all persons
   const totalCoinsAll = persons.reduce((sum, p) => sum + (p.totalCoins || 0), 0);
@@ -269,7 +274,7 @@ export const BotsTab: React.FC<BotsTabProps> = ({
   });
 
   // Table Sorting state
-  type BotSortField = 'botNumber' | 'name' | 'status' | 'coins';
+  type BotSortField = 'botNumber' | 'name' | 'level' | 'status' | 'coins';
   const [sortField, setSortField] = useState<BotSortField>('botNumber');
   const [sortAsc, setSortAsc] = useState<boolean>(true);
 
@@ -294,6 +299,14 @@ export const BotsTab: React.FC<BotsTabProps> = ({
       }
     } else if (sortField === 'name') {
       cmp = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    } else if (sortField === 'level') {
+      const lvlA = parseInt(a.botLevel || '', 10);
+      const lvlB = parseInt(b.botLevel || '', 10);
+      if (!isNaN(lvlA) && !isNaN(lvlB)) {
+        cmp = lvlA - lvlB;
+      } else {
+        cmp = (a.botLevel || '').localeCompare(b.botLevel || '', undefined, { numeric: true });
+      }
     } else if (sortField === 'status') {
       const statusA = a.status || 'working';
       const statusB = b.status || 'working';
@@ -322,6 +335,7 @@ export const BotsTab: React.FC<BotsTabProps> = ({
   const handleOpenAdd = () => {
     setNewName('');
     setNewBotNumber('');
+    setNewBotLevel('');
     setNewPinId('');
     setNewStatus('working');
     setNewBanLiftDate('');
@@ -336,7 +350,8 @@ export const BotsTab: React.FC<BotsTabProps> = ({
       newPinId || undefined,
       newStatus,
       newStatus === 'banned' ? newBanLiftDate || undefined : undefined,
-      newBotNumber.trim() || undefined
+      newBotNumber.trim() || undefined,
+      newBotLevel.trim() || undefined
     );
     setIsAddModalOpen(false);
   };
@@ -345,6 +360,7 @@ export const BotsTab: React.FC<BotsTabProps> = ({
     setEditingPerson(person);
     setEditName(person.name);
     setEditBotNumber(person.botNumber || '');
+    setEditBotLevel(person.botLevel || '');
     setEditPinId(person.assignedPinId || '');
     setEditStatus(person.status || 'working');
     setEditBanLiftDate(person.banLiftDate || '');
@@ -359,7 +375,8 @@ export const BotsTab: React.FC<BotsTabProps> = ({
       editPinId || undefined,
       editStatus,
       editStatus === 'banned' ? editBanLiftDate || undefined : undefined,
-      editBotNumber.trim() || undefined
+      editBotNumber.trim() || undefined,
+      editBotLevel.trim() || undefined
     );
     setEditingPerson(null);
   };
@@ -374,7 +391,8 @@ export const BotsTab: React.FC<BotsTabProps> = ({
         person.assignedPinId,
         'working',
         undefined,
-        person.botNumber
+        person.botNumber,
+        person.botLevel
       );
     } else {
       // Open edit modal with banned selected so user can enter ban lift date
@@ -442,6 +460,23 @@ export const BotsTab: React.FC<BotsTabProps> = ({
                 </span>
               )}
             </div>
+            {/* Weekly & Monthly Projection Stat for Best Pin */}
+            {bestAvgPin && (
+              <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between text-[10px] font-mono text-slate-500">
+                <span>
+                  Wk:{' '}
+                  <strong className="text-orange-700 font-semibold">
+                    ~{(bestAvgPin.hasIntervalRate ? bestAvgPin.coinsPerDay * 7 : bestAvgPin.avgCoinsPerBot * 7).toLocaleString()}
+                  </strong>
+                </span>
+                <span>
+                  Mo:{' '}
+                  <strong className="text-orange-700 font-semibold">
+                    ~{(bestAvgPin.hasIntervalRate ? bestAvgPin.coinsPerDay * 30 : bestAvgPin.avgCoinsPerBot * 30).toLocaleString()}
+                  </strong>
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -471,6 +506,23 @@ export const BotsTab: React.FC<BotsTabProps> = ({
             <span className="text-[11px] text-slate-400 block mt-0.5">
               Across {persons.length} worker{persons.length === 1 ? '' : 's'}
             </span>
+            {/* Workforce Weekly & Monthly Projection Stat */}
+            {totalWorkforceDailyRate > 0 && (
+              <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between text-[10px] font-mono text-slate-500">
+                <span>
+                  Wk:{' '}
+                  <strong className="text-amber-700 font-semibold">
+                    ~{(totalWorkforceDailyRate * 7).toLocaleString()}
+                  </strong>
+                </span>
+                <span>
+                  Mo:{' '}
+                  <strong className="text-amber-700 font-semibold">
+                    ~{(totalWorkforceDailyRate * 30).toLocaleString()}
+                  </strong>
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -551,7 +603,7 @@ export const BotsTab: React.FC<BotsTabProps> = ({
           <button
             type="button"
             onClick={() => {
-              const fields: BotSortField[] = ['botNumber', 'name', 'status', 'coins'];
+              const fields: BotSortField[] = ['botNumber', 'name', 'level', 'status', 'coins'];
               const nextIdx = (fields.indexOf(sortField) + 1) % fields.length;
               handleToggleSort(fields[nextIdx]);
             }}
@@ -640,10 +692,26 @@ export const BotsTab: React.FC<BotsTabProps> = ({
                 onClick={() => handleToggleSort('name')}
                 title={`Sort by Name (${sortField === 'name' ? (sortAsc ? 'Ascending' : 'Descending') : 'Click to sort'})`}
                 aria-label="Sort by Name"
-                className="w-36 sm:w-44 md:w-52 shrink-0 flex items-center gap-1 hover:text-slate-900 transition-colors cursor-pointer group text-left"
+                className="w-36 sm:w-44 md:w-48 shrink-0 flex items-center gap-1 hover:text-slate-900 transition-colors cursor-pointer group text-left"
               >
                 <span>Name / Pin</span>
                 {sortField === 'name' ? (
+                  sortAsc ? <ArrowUp className="w-3 h-3 text-sky-600 stroke-[2.5]" /> : <ArrowDown className="w-3 h-3 text-sky-600 stroke-[2.5]" />
+                ) : (
+                  <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-500" />
+                )}
+              </button>
+
+              {/* Level Sort */}
+              <button
+                type="button"
+                onClick={() => handleToggleSort('level')}
+                title={`Sort by Bot Level (${sortField === 'level' ? (sortAsc ? 'Ascending' : 'Descending') : 'Click to sort'})`}
+                aria-label="Sort by Bot Level"
+                className="w-16 sm:w-20 shrink-0 flex items-center gap-1 hover:text-slate-900 transition-colors cursor-pointer group text-left"
+              >
+                <span>Level</span>
+                {sortField === 'level' ? (
                   sortAsc ? <ArrowUp className="w-3 h-3 text-sky-600 stroke-[2.5]" /> : <ArrowDown className="w-3 h-3 text-sky-600 stroke-[2.5]" />
                 ) : (
                   <ArrowUpDown className="w-3 h-3 text-slate-300 group-hover:text-slate-500" />
@@ -672,7 +740,7 @@ export const BotsTab: React.FC<BotsTabProps> = ({
                 onClick={() => handleToggleSort('coins')}
                 title={`Sort by Coins (${sortField === 'coins' ? (sortAsc ? 'Ascending' : 'Descending') : 'Click to sort'})`}
                 aria-label="Sort by Coins"
-                className="w-28 sm:w-36 shrink-0 flex items-center gap-1 hover:text-slate-900 transition-colors cursor-pointer group text-left"
+                className="w-28 sm:w-32 shrink-0 flex items-center gap-1 hover:text-slate-900 transition-colors cursor-pointer group text-left"
               >
                 <span>Coins</span>
                 {sortField === 'coins' ? (
@@ -691,29 +759,54 @@ export const BotsTab: React.FC<BotsTabProps> = ({
             const assignedPinObj = pins.find((p) => p.id === person.assignedPinId);
             const isBanned = person.status === 'banned';
 
+            // Check if gold entry has been made for the day (Asia/Manila time)
+            const todayPHStr = getPHDateString(new Date());
+            const hasLoggedToday = (person.logs || []).some((log) => {
+              if (log.type !== 'coins') return false;
+              const amt = typeof log.amount === 'number' ? log.amount : 0;
+              if (amt <= 0) return false;
+              return getPHDateString(log.timestamp) === todayPHStr;
+            });
+
             return (
               <div
                 key={person.id}
-                className={`p-3.5 sm:p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 transition-colors ${
-                  isBanned ? 'bg-rose-50/20 hover:bg-rose-50/40' : 'hover:bg-slate-50/70'
+                className={`p-3.5 sm:p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 transition-colors border-l-4 ${
+                  hasLoggedToday
+                    ? 'bg-emerald-50/70 hover:bg-emerald-100/70 border-l-emerald-500'
+                    : 'bg-rose-50/70 hover:bg-rose-100/70 border-l-rose-500'
                 }`}
+                title={
+                  hasLoggedToday
+                    ? 'Gold entry logged today (PHT)'
+                    : 'No gold entry logged yet for today (PHT)'
+                }
               >
                 {/* Person Information & Aligned Status & Coins */}
                 <div className="flex items-center gap-3 min-w-0 flex-1 flex-wrap sm:flex-nowrap">
                   {/* Bot Avatar */}
                   <div
-                    className={`w-9 h-9 rounded-xl border flex items-center justify-center font-bold text-xs shrink-0 ${
+                    className={`w-9 h-9 rounded-xl border flex flex-col items-center justify-center font-bold text-xs shrink-0 shadow-2xs ${
                       isBanned
-                        ? 'bg-rose-50 border-rose-200 text-rose-700'
-                        : 'bg-sky-50 border-sky-100 text-sky-700'
+                        ? 'bg-rose-100 border-rose-300 text-rose-800'
+                        : hasLoggedToday
+                        ? 'bg-emerald-100 border-emerald-300 text-emerald-800'
+                        : 'bg-white border-rose-200 text-rose-700'
                     }`}
                   >
-                    {person.botNumber ? person.botNumber : person.name.charAt(0).toUpperCase()}
+                    <span className="text-xs leading-none">
+                      {person.botNumber ? person.botNumber : person.name.charAt(0).toUpperCase()}
+                    </span>
+                    {person.botLevel && (
+                      <span className="text-[9px] font-mono text-indigo-700 leading-none mt-0.5 font-bold">
+                        L{person.botLevel}
+                      </span>
+                    )}
                   </div>
 
                   {/* Column 1: Bot Name + Pin (fixed width for unified alignment) */}
-                  <div className="w-36 sm:w-44 md:w-52 shrink-0 min-w-0">
-                    <div className="flex items-center min-w-0">
+                  <div className="w-36 sm:w-44 md:w-48 shrink-0 min-w-0">
+                    <div className="flex items-center gap-1.5 min-w-0">
                       <span className="font-semibold text-sm text-slate-900 truncate" title={person.name}>
                         {person.name}
                       </span>
@@ -734,30 +827,51 @@ export const BotsTab: React.FC<BotsTabProps> = ({
                     </div>
                   </div>
 
-                  {/* Column 2: Status Badge (fixed width for unified horizontal alignment) */}
-                  <div className="w-28 sm:w-32 shrink-0 flex flex-col justify-center">
+                  {/* Column 2: Bot Level Badge */}
+                  <div className="w-16 sm:w-20 shrink-0 flex items-center">
+                    {person.botLevel ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-bold bg-indigo-50/90 text-indigo-700 border border-indigo-200/80 shadow-2xs">
+                        Lv. {person.botLevel}
+                      </span>
+                    ) : (
+                      <span className="text-[11px] font-mono text-slate-400 italic">Lv. —</span>
+                    )}
+                  </div>
+
+                  {/* Column 3: Status Badge & Today's Logging Chip */}
+                  <div className="w-28 sm:w-32 shrink-0 flex flex-col justify-center gap-1">
                     {isBanned ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-rose-50 text-rose-700 border border-rose-200/80 w-fit">
-                        <Ban className="w-3 h-3 text-rose-500 shrink-0" />
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-rose-100 text-rose-800 border border-rose-300/80 w-fit">
+                        <Ban className="w-3 h-3 text-rose-600 shrink-0" />
                         Banned
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80 w-fit">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300/80 w-fit">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
                         Working
                       </span>
                     )}
                     {isBanned && person.banLiftDate && (
-                      <span className="text-[10px] text-rose-600 font-mono mt-0.5 truncate flex items-center gap-0.5">
+                      <span className="text-[10px] text-rose-700 font-mono truncate flex items-center gap-0.5">
                         <Calendar className="w-2.5 h-2.5 shrink-0" />
                         Lifts: {person.banLiftDate}
                       </span>
                     )}
+                    {/* Today's log status badge */}
+                    {hasLoggedToday ? (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-emerald-800 bg-emerald-100/90 border border-emerald-300 px-1.5 py-0.2 rounded w-fit">
+                        <Check className="w-2.5 h-2.5 stroke-[3] text-emerald-700" /> Logged Today
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-rose-800 bg-rose-100/90 border border-rose-300 px-1.5 py-0.2 rounded w-fit">
+                        <AlertCircle className="w-2.5 h-2.5 text-rose-600" /> No Log Today
+                      </span>
+                    )}
                   </div>
 
-                  {/* Column 3: Total Coins Pill (fixed width for unified horizontal alignment) */}
-                  <div className="w-28 sm:w-36 shrink-0 flex items-center">
-                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold bg-amber-50 text-amber-700 border border-amber-200/60">
+                  {/* Column 4: Total Coins Pill */}
+                  <div className="w-28 sm:w-32 shrink-0 flex items-center">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono font-semibold bg-amber-50 text-amber-700 border border-amber-200/60 shadow-2xs">
                       <Coins className="w-3 h-3 text-amber-500 shrink-0" />
                       {person.totalCoins.toLocaleString()} coins
                     </span>
@@ -928,7 +1042,7 @@ export const BotsTab: React.FC<BotsTabProps> = ({
             </div>
 
             <form onSubmit={handleSaveNewPerson} className="p-5 space-y-4">
-              <div className="grid grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-4 gap-2.5">
                 <div className="col-span-1">
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Bot #
@@ -938,6 +1052,18 @@ export const BotsTab: React.FC<BotsTabProps> = ({
                     value={newBotNumber}
                     onChange={(e) => setNewBotNumber(e.target.value)}
                     placeholder="e.g. 1"
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white font-mono"
+                  />
+                </div>
+                <div className="col-span-1">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Level
+                  </label>
+                  <input
+                    type="text"
+                    value={newBotLevel}
+                    onChange={(e) => setNewBotLevel(e.target.value)}
+                    placeholder="e.g. 50"
                     className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white font-mono"
                   />
                 </div>
@@ -1079,7 +1205,7 @@ export const BotsTab: React.FC<BotsTabProps> = ({
             </div>
 
             <form onSubmit={handleSaveEditPerson} className="p-5 space-y-4">
-              <div className="grid grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-4 gap-2.5">
                 <div className="col-span-1">
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Bot #
@@ -1089,6 +1215,18 @@ export const BotsTab: React.FC<BotsTabProps> = ({
                     value={editBotNumber}
                     onChange={(e) => setEditBotNumber(e.target.value)}
                     placeholder="e.g. 1"
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white font-mono"
+                  />
+                </div>
+                <div className="col-span-1">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Level
+                  </label>
+                  <input
+                    type="text"
+                    value={editBotLevel}
+                    onChange={(e) => setEditBotLevel(e.target.value)}
+                    placeholder="e.g. 50"
                     className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white font-mono"
                   />
                 </div>
@@ -1219,8 +1357,19 @@ export const BotsTab: React.FC<BotsTabProps> = ({
                   <History className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900">
-                    {activeHistoryPerson.name} — History
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
+                    <span>{activeHistoryPerson.name}</span>
+                    {activeHistoryPerson.botNumber && (
+                      <span className="text-[11px] font-mono px-1.5 py-0.2 rounded bg-slate-200/80 text-slate-700 font-semibold">
+                        #{activeHistoryPerson.botNumber}
+                      </span>
+                    )}
+                    {activeHistoryPerson.botLevel && (
+                      <span className="text-[11px] font-mono px-1.5 py-0.2 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 font-bold">
+                        Lv. {activeHistoryPerson.botLevel}
+                      </span>
+                    )}
+                    <span className="text-slate-400 font-normal">— History</span>
                   </h3>
                   <p className="text-[11px] text-slate-500">
                     Total: <strong className="text-amber-600 font-mono">{activeHistoryPerson.totalCoins.toLocaleString()} coins</strong> · {activeHistoryPerson.logs.length} logged events

@@ -56,7 +56,8 @@ interface DashboardProps {
     assignedPinId?: string,
     status?: BotStatus,
     banLiftDate?: string,
-    botNumber?: string
+    botNumber?: string,
+    botLevel?: string
   ) => void;
   onUpdatePerson: (
     personId: string,
@@ -64,7 +65,8 @@ interface DashboardProps {
     newPinId?: string,
     status?: BotStatus,
     banLiftDate?: string,
-    botNumber?: string
+    botNumber?: string,
+    botLevel?: string
   ) => void;
   onDeletePerson: (personId: string) => void;
   onLogCoins: (personId: string, amount: number) => void;
@@ -474,9 +476,20 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </span>
                 <span className="text-xs text-amber-700/80 font-normal">/day</span>
               </div>
-              <p className="text-[11px] text-amber-700/70 font-mono mt-1">
+              <p className="text-[11px] text-amber-700/70 font-mono mt-0.5">
                 ~{totalHourlyCoinsYield.toLocaleString()} gold / hour
               </p>
+              {/* Weekly & Monthly Projection Stat */}
+              <div className="mt-2.5 pt-2 border-t border-amber-200/70 grid grid-cols-2 gap-1.5 text-[11px] font-mono">
+                <div className="bg-amber-50/70 p-1.5 rounded-lg border border-amber-200/60">
+                  <span className="text-amber-800/70 text-[9px] block font-semibold uppercase tracking-wider">Weekly</span>
+                  <span className="text-amber-900 font-bold">~{(totalDailyCoinsYield * 7).toLocaleString()}</span>
+                </div>
+                <div className="bg-amber-50/70 p-1.5 rounded-lg border border-amber-200/60">
+                  <span className="text-amber-800/70 text-[9px] block font-semibold uppercase tracking-wider">Monthly</span>
+                  <span className="text-amber-900 font-bold">~{(totalDailyCoinsYield * 30).toLocaleString()}</span>
+                </div>
+              </div>
             </div>
 
             {/* Card 3: Top Yielding Landmark Pin */}
@@ -671,12 +684,18 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
               {/* Live Yield Summary Pill & Filter Controls */}
               <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
-                <div className="px-3.5 py-1.5 rounded-xl bg-white border border-amber-200/90 shadow-2xs flex items-center gap-2 shrink-0">
-                  <span className="text-[11px] font-medium text-amber-800">Total Projection:</span>
+                <div className="px-3.5 py-1.5 rounded-xl bg-white border border-amber-200/90 shadow-2xs flex items-center gap-2.5 shrink-0 flex-wrap">
+                  <span className="text-[11px] font-medium text-amber-800">Projections:</span>
                   <span className="text-sm font-extrabold font-mono text-amber-600 flex items-center gap-1 tabular-nums">
                     <Coins className="w-4 h-4 text-amber-500 shrink-0" />
                     +{totalDailyCoinsYield.toLocaleString()}{' '}
                     <span className="text-[11px] font-normal text-slate-400">/day</span>
+                  </span>
+                  <span className="text-xs font-mono font-semibold text-amber-700 tabular-nums">
+                    ~{(totalDailyCoinsYield * 7).toLocaleString()} <span className="text-[10px] font-normal text-slate-400">/wk</span>
+                  </span>
+                  <span className="text-xs font-mono font-semibold text-amber-700 tabular-nums">
+                    ~{(totalDailyCoinsYield * 30).toLocaleString()} <span className="text-[10px] font-normal text-slate-400">/mo</span>
                   </span>
                 </div>
 
@@ -1350,7 +1369,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <Check className="w-4 h-4 stroke-[3]" />
                 </div>
                 <div className="text-xs text-slate-600 space-y-1">
-                  <p className="font-bold text-slate-900">Android APK & WebAPK (v1.0.2)</p>
+                  <p className="font-bold text-slate-900">Android APK & WebAPK (v1.0.3)</p>
                   <p>
                     Built package includes full Android manifest, offline cache, and adaptive high-res icons.
                   </p>
@@ -1362,13 +1381,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div className="flex items-center justify-between">
                   <div>
                     <span className="text-xs font-bold text-slate-800 block">Download Android APK</span>
-                    <span className="text-[11px] text-slate-500 font-mono">mqs-map-plotter-v1.0.2.apk</span>
+                    <span className="text-[11px] text-slate-500 font-mono">mqs-map-plotter-v1.0.3.apk</span>
                   </div>
                   <a
-                    href="/mqs-map-plotter-v1.0.2.apk"
-                    download="mqs-map-plotter-v1.0.2.apk"
-                    title="Download APK v1.0.2"
-                    aria-label="Download APK v1.0.2"
+                    href="/mqs-map-plotter-v1.0.3.apk"
+                    download="mqs-map-plotter-v1.0.3.apk"
+                    title="Download APK v1.0.3"
+                    aria-label="Download APK v1.0.3"
                     className="p-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs transition-colors flex items-center justify-center shrink-0 cursor-pointer"
                   >
                     <Download className="w-4 h-4" />
